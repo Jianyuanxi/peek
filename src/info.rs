@@ -1,4 +1,4 @@
-// 文件信息：大小、时间、文件夹统计（文件夹大小走 Everything 的 es.exe）
+// 文件信息：大小、时间、哈希、旧版 Office 转 PDF
 use serde_json::{json, Value};
 use std::os::windows::fs::MetadataExt;
 use std::os::windows::process::CommandExt;
@@ -79,77 +79,6 @@ pub fn basic(path: &str, index: usize, total: usize) -> Value {
         "index": index,
         "total": total,
     })
-}
-
-fn es(args: &[&str]) -> Option<String> {
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let out = Command::new("es.exe").args(args).creation_flags(CREATE_NO_WINDOW).output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    Some(String::from_utf8_lossy(&out.stdout).to_string())
-}
-
-fn es_json(args: &[&str]) -> Vec<Value> {
-    es(args).and_then(|s| serde_json::from_str::<Vec<Value>>(s.trim()).ok()).unwrap_or_default()
-}
-
-/// 文件夹统计：总大小、文件/子文件夹数、最大的子项。全部来自 Everything 索引
-pub fn folder_stats(path: &str) -> Value {
-    let dir = path.trim_end_matches('\\').to_string();
-    let p = Path::new(&dir);
-    let mut size: Option<u64> = None;
-    if let Some(parent) = p.parent().filter(|_| p.file_name().is_some()) {
-        let mut parent_s = parent.to_string_lossy().to_string();
-        if !parent_s.ends_with('\\') {
-            parent_s.push('\\');
-        }
-        let want = format!("{}\\", dir).to_lowercase();
-        for v in es_json(&["-json", "-size", "-parent", &parent_s, "folder:"]) {
-            if v["filename"].as_str().map(|f| f.to_lowercase() == want).unwrap_or(false) {
-                size = v["size"].as_u64();
-            }
-        }
-    } else {
-        // 盘符根目录：用磁盘已用空间
-        size = disk_used(&format!("{}\\", dir));
-    }
-    let count = |kind: &str| es(&["-get-result-count", "-path", &format!("{}\\", dir), kind]).and_then(|s| s.trim().parse::<u64>().ok());
-    let files = count("file:");
-    let folders = count("folder:");
-    let pdir = format!("{}\\", dir);
-    let mut kids: Vec<Value> = es_json(&["-json", "-size", "-n", "30", "-sort", "size-descending", "-parent", &pdir, "folder:"]);
-    kids.extend(es_json(&["-json", "-size", "-n", "30", "-sort", "size-descending", "-parent", &pdir, "file:"]));
-    kids.sort_by_key(|v| std::cmp::Reverse(v["size"].as_u64().unwrap_or(0)));
-    kids.truncate(30);
-    let kids: Vec<Value> = kids
-        .into_iter()
-        .map(|v| {
-            let f = v["filename"].as_str().unwrap_or("").to_string();
-            let is_dir = f.ends_with('\\');
-            let name = f.trim_end_matches('\\').rsplit('\\').next().unwrap_or("").to_string();
-            let s = v["size"].as_u64().unwrap_or(0);
-            json!({"name": name, "dir": is_dir, "size": s, "sizeText": fmt_size(s)})
-        })
-        .collect();
-    json!({
-        "path": path,
-        "size": size,
-        "sizeText": size.map(fmt_size),
-        "files": files,
-        "folders": folders,
-        "children": kids,
-        "everything": files.is_some(),
-    })
-}
-
-fn disk_used(root: &str) -> Option<u64> {
-    use windows::core::HSTRING;
-    use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
-    let mut free = 0u64;
-    let mut total = 0u64;
-    unsafe { GetDiskFreeSpaceExW(&HSTRING::from(root), None, Some(&mut total), Some(&mut free)).ok()? };
-    Some(total - free)
 }
 
 /// MD5 + SHA256，流式读取

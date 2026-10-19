@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use tao::dpi::{LogicalSize, PhysicalPosition};
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
-use tao::platform::windows::WindowExtWindows;
+use tao::platform::windows::{WindowBuilderExtWindows, WindowExtWindows};
 use tao::window::{Window, WindowBuilder};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem};
 use tray_icon::TrayIconBuilder;
@@ -29,6 +29,8 @@ enum UserEvent {
     List { items: Vec<String>, index: usize },
     Js(String),
     TrayRetry,
+    /// 预览窗口在前台时钩子截下的按键（native::KEY_*）
+    Key(isize),
     Ipc(String),
     Menu(MenuEvent),
     Tick,
@@ -143,16 +145,8 @@ impl App {
     fn show_current(&mut self) {
         let Some(path) = self.items.get(self.index).cloned() else { return };
         let v = info::basic(&path, self.index, self.items.len());
-        let is_dir = v["isDir"].as_bool().unwrap_or(false);
         self.window.set_title(v["name"].as_str().unwrap_or("Peek"));
         self.eval(format!("peek.show({})", v));
-        if is_dir {
-            let p = self.proxy.clone();
-            std::thread::spawn(move || {
-                let s = info::folder_stats(&path);
-                let _ = p.send_event(UserEvent::Js(format!("peek.folder({})", s)));
-            });
-        }
     }
 
     fn open_preview(&mut self, fg: isize, items: Vec<String>) {
@@ -190,7 +184,7 @@ impl App {
     }
 
     /// 按内容比例设窗口大小并居中：内容区 cw×ch（CSS 像素），ew/eh 是界面框架占的宽高。
-    /// 最大占工作区 88%，内容比这小就按原尺寸，不放大；最小 420×300
+    /// 最大占工作区 70%，内容比这小就按原尺寸，不放大；最小 420×300
     fn fit(&self, cw: f64, ch: f64, ew: f64, eh: f64) {
         if cw < 1.0 || ch < 1.0 || self.window.is_maximized() {
             return;
@@ -198,7 +192,7 @@ impl App {
         let anchor = if self.prev_fg != 0 { self.prev_fg } else { hwnd_of(&self.window).0 as isize };
         let Some((x, y, w, h)) = native::monitor_work_area(anchor) else { return };
         let s = self.window.scale_factor();
-        let (maxw, maxh) = ((w as f64 * 0.88 / s - ew).max(1.0), (h as f64 * 0.88 / s - eh).max(1.0));
+        let (maxw, maxh) = ((w as f64 * 0.7 / s - ew).max(1.0), (h as f64 * 0.7 / s - eh).max(1.0));
         let k = (maxw / cw).min(maxh / ch).min(1.0);
         let size = LogicalSize::new((cw * k + ew).max(420.0).round(), (ch * k + eh).max(300.0).round());
         if self.window.inner_size().to_logical::<f64>(s) == size {
@@ -217,6 +211,7 @@ impl App {
             let _ = w.evaluate_script("peek.clear()");
         }
         self.window.set_visible(false);
+        native::TYPING.store(false, std::sync::atomic::Ordering::Relaxed);
         if let Some(w) = &self.webview {
             let _ = w.set_memory_usage_level(wry::MemoryUsageLevel::Low);
         }
@@ -248,6 +243,10 @@ impl App {
                 self.eval(js);
             }
             "close" => self.hide(),
+            "typing" => native::TYPING.store(v["on"].as_bool().unwrap_or(false), std::sync::atomic::Ordering::Relaxed),
+            "drag" => {
+                let _ = self.window.drag_window();
+            }
             "fit" => {
                 let f = |k: &str| v[k].as_f64().unwrap_or(0.0);
                 self.fit(f("w"), f("h"), f("ew"), f("eh"));
@@ -455,9 +454,14 @@ fn main() {
     native::start_hook(htx);
     {
         let w = wtx.clone();
+        let kp = proxy.clone();
         std::thread::spawn(move || {
             for fg in hrx {
-                let _ = w.send(WorkerCmd::Query(fg));
+                if fg < 0 {
+                    let _ = kp.send_event(UserEvent::Key(fg));
+                } else {
+                    let _ = w.send(WorkerCmd::Query(fg));
+                }
             }
         });
     }
@@ -474,7 +478,9 @@ fn main() {
     let window = WindowBuilder::new()
         .with_title("Peek")
         .with_visible(false)
-        .with_inner_size(LogicalSize::new(1100.0, 760.0))
+        .with_inner_size(LogicalSize::new(880.0, 600.0))
+        .with_decorations(false)
+        .with_undecorated_shadow(true)
         .with_min_inner_size(LogicalSize::new(420.0, 300.0))
         .build(&event_loop)
         .unwrap();
@@ -550,6 +556,12 @@ fn main() {
                     auto_item.set_checked(on);
                 }
             }
+            Event::UserEvent(UserEvent::Key(k)) => match k {
+                native::KEY_CLOSE => app.hide(),
+                native::KEY_PREV => app.step(-1),
+                native::KEY_NEXT => app.step(1),
+                _ => {}
+            },
             Event::UserEvent(UserEvent::TrayRetry) => {
                 if tray.is_none() {
                     tray = make_tray();

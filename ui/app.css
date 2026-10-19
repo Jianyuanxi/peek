@@ -17,29 +17,27 @@ body {
   font: 13px/1.5 "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif;
   display: flex; flex-direction: column; overflow: hidden;
 }
-/* 顶栏平时隐藏，鼠标移到窗口顶部才滑出来，盖在内容上，不占位置 */
-#bar { position: fixed; top: 0; left: 0; right: 0; z-index: 6; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 10px;
-  border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 88%, transparent); backdrop-filter: blur(12px);
-  opacity: 0; transform: translateY(-100%); pointer-events: none; transition: opacity .15s, transform .15s; }
-/* PDF 等 iframe 会吞掉鼠标事件，顶部留一条透明感应区 */
-#hot { position: fixed; top: 0; left: 0; right: 0; height: 10px; z-index: 7; }
-body.bar-on #hot { display: none; }
-body.bar-on #bar { opacity: 1; transform: none; pointer-events: auto; }
+/* 唯一的界面框架：顶部深色功能栏（窗口无系统标题栏），左边文件名，右边功能；按住空白处拖动窗口 */
+#bar { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 6px 0 12px; flex: none;
+  background: #1c1c1f; color: #ececf0; user-select: none; }
+#bar button.ic { color: #d8d8de; }
+#bar button.ic:hover { background: #34343a; color: #fff; }
+#bar button.ic.on { background: var(--accent); color: #fff; }
+#b-close:hover { background: #c42b1c !important; }
 button.ic { width: 30px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: transparent; }
 button.ic:hover { background: var(--btn-h); }
 button.ic.on { background: var(--accent); color: #fff; }
+button.ic[hidden] { display: none; }
 button.ic:disabled { opacity: .45; cursor: default; }
 button.ic svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 #title { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline; }
 #name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#pos { color: var(--muted); font-size: 12px; flex: none; }
 #tools { display: flex; gap: 4px; flex: none; }
 button { font: inherit; font-size: 12px; color: var(--fg); background: var(--btn); border: 0; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
 button:hover { background: var(--btn-h); }
 button.on { background: var(--accent); color: #fff; }
-#findbar { position: absolute; top: 10px; right: 14px; z-index: 5; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px; display: flex; gap: 6px; align-items: center; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+#findbar { position: absolute; top: 46px; right: 14px; z-index: 5; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px; display: flex; gap: 6px; align-items: center; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
 #findbar[hidden] { display: none; }
-body.bar-on #findbar { top: 46px; }
 #find-in { width: 280px; font: inherit; padding: 4px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--fg); outline: none; }
 #find-st { color: var(--muted); font-size: 12px; }
 #main { flex: 1; display: flex; min-height: 0; }
@@ -50,11 +48,9 @@ body.bar-on #findbar { top: 46px; }
 #props td { padding: 3px 0; vertical-align: top; word-break: break-all; }
 #props td:first-child { color: var(--muted); white-space: nowrap; padding-right: 10px; width: 1%; }
 #hashbox { margin-top: 12px; }
-#hash, #ocr { white-space: pre-wrap; word-break: break-all; font: 12px/1.5 Consolas, "Microsoft YaHei UI", monospace; user-select: text; margin: 6px 0 0; }
+#hash, #ocr { white-space: pre-wrap; word-break: break-all; font: 12px/1.6 "Cascadia Mono", "Noto Sans SC", monospace; user-select: text; margin: 6px 0 0; }
 .ocr-h { margin-top: 14px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
-#status { flex: none; height: 28px; line-height: 28px; padding: 0 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#status b { color: var(--fg); font-weight: 600; }
-#toast { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); background: rgba(0,0,0,.78); color: #fff; padding: 6px 14px; border-radius: 6px; font-size: 12px; }
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: rgba(0,0,0,.78); color: #fff; padding: 6px 14px; border-radius: 6px; font-size: 12px; }
 #toast[hidden] { display: none; }
 
 /* 各类预览 */
@@ -73,13 +69,18 @@ body.bar-on #findbar { top: 46px; }
 .checker { background-image: linear-gradient(45deg, rgba(128,128,128,.12) 25%, transparent 25%, transparent 75%, rgba(128,128,128,.12) 75%), linear-gradient(45deg, rgba(128,128,128,.12) 25%, transparent 25%, transparent 75%, rgba(128,128,128,.12) 75%); background-size: 20px 20px; background-position: 0 0, 10px 10px; }
 video, audio { max-width: 100%; max-height: 100%; outline: none; }
 iframe.full { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; }
-pre.code { margin: 0; padding: 12px 16px; font: 13px/1.55 "Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace; white-space: pre; tab-size: 4; user-select: text; min-height: 100%; background: var(--code); }
-pre.code.wrap { white-space: pre-wrap; word-break: break-all; }
+iframe.full.pdf { bottom: auto; height: calc(100% + 18px); }
+/* 文本和代码：英文 Cascadia Mono（等宽，代码对齐），中文 Noto Sans SC（思源黑体）；自动换行，不出横向滚动 */
+pre.code { margin: 0; padding: 14px 18px; font: 14px/1.7 "Cascadia Mono", "Noto Sans SC", monospace; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; user-select: text; min-height: 100%; background: var(--code); }
 pre.code code.hljs { background: transparent; padding: 0; }
+/* code 元素默认用浏览器的 monospace（中文系统落到宋体），要显式继承上面的字体 */
+pre.code code { font: inherit; }
 .note { color: var(--muted); font-size: 12px; padding: 6px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 1; }
 .md { max-width: 900px; margin: 0 auto; padding: 20px 32px 60px; font-size: 14px; line-height: 1.7; user-select: text; }
 .md pre { background: var(--code); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; overflow: auto; }
-.md code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12.5px; }
+.md code { font-family: "Cascadia Mono", "Noto Sans SC", monospace; font-size: 13px; }
+.md pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.md { overflow-wrap: anywhere; }
 .md table { border-collapse: collapse; } .md td, .md th { border: 1px solid var(--line); padding: 4px 10px; }
 .md img { max-width: 100%; }
 .md blockquote { margin: 0; padding-left: 14px; border-left: 3px solid var(--line); color: var(--muted); }
@@ -100,8 +101,6 @@ table.grid tr:first-child td, table.grid th { background: var(--panel); font-wei
 .list td.n { width: 100%; white-space: normal; word-break: break-all; }
 .list td.r { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 .list tr:hover td { background: var(--panel); }
-.bar-cell { position: relative; }
-.bar-cell i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); opacity: .12; }
 .card { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px; text-align: center; }
 .card img { max-width: min(512px, 80%); max-height: 60%; object-fit: contain; }
 .card .big { font-size: 20px; font-weight: 600; word-break: break-all; }

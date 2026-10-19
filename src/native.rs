@@ -18,21 +18,44 @@ fn down(vk: VIRTUAL_KEY) -> bool {
     unsafe { (GetAsyncKeyState(vk.0 as i32) as u16 & 0x8000) != 0 }
 }
 
+/// 网页里输入框（查找框）有焦点时为 true，这时预览窗口里的按键不拦截
+pub static TYPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// 钩子发往主线程的预览窗口按键命令（负数，和资源管理器窗口句柄区分开）
+pub const KEY_CLOSE: isize = -1;
+pub const KEY_PREV: isize = -2;
+pub const KEY_NEXT: isize = -3;
+
 unsafe extern "system" fn kb_proc(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 && (wp.0 as u32 == WM_KEYDOWN) {
         let k = &*(lp.0 as *const KBDLLHOOKSTRUCT);
-        if k.vkCode == VK_SPACE.0 as u32
-            && !down(VK_CONTROL)
-            && !down(VK_MENU)
-            && !down(VK_SHIFT)
-            && !down(VK_LWIN)
-            && !down(VK_RWIN)
-        {
+        let vk = k.vkCode;
+        if !down(VK_CONTROL) && !down(VK_MENU) && !down(VK_SHIFT) && !down(VK_LWIN) && !down(VK_RWIN) {
             let fg = GetForegroundWindow();
-            if is_explorer_list(fg) {
+            let send = |v: isize| {
                 if let Some(tx) = HOOK_TX.get() {
-                    let _ = tx.send(fg.0 as isize);
+                    let _ = tx.send(v);
                 }
+            };
+            let own = OWN_HWND.load(std::sync::atomic::Ordering::Relaxed);
+            if own != 0 && fg.0 as isize == own {
+                // 预览窗口里这几个键在原生层处理：PDF 查看器、视频控件拿到焦点后网页收不到按键
+                if !TYPING.load(std::sync::atomic::Ordering::Relaxed) {
+                    let cmd = if vk == VK_SPACE.0 as u32 || vk == VK_ESCAPE.0 as u32 {
+                        KEY_CLOSE
+                    } else if vk == VK_UP.0 as u32 {
+                        KEY_PREV
+                    } else if vk == VK_DOWN.0 as u32 {
+                        KEY_NEXT
+                    } else {
+                        0
+                    };
+                    if cmd != 0 {
+                        send(cmd);
+                        return LRESULT(1);
+                    }
+                }
+            } else if vk == VK_SPACE.0 as u32 && is_explorer_list(fg) {
+                send(fg.0 as isize);
                 return LRESULT(1);
             }
         }

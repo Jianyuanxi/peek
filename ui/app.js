@@ -67,21 +67,11 @@ function toast(t) {
   clearTimeout(toast.t); toast.t = setTimeout(() => el.hidden = true, 1400);
 }
 
-function setMeta(k, v) { if (v === '' || v == null) delete meta[k]; else meta[k] = v; renderStatus(); renderProps(); }
-
-function renderStatus() {
-  if (!cur) return;
-  const parts = [];
-  const size = cur.isDir ? (cur.folderSizeText || '统计中…') : cur.sizeText;
-  if (size) parts.push('<b>' + esc(size) + '</b>');
-  for (const [k, v] of Object.entries(meta)) parts.push(esc(k) + ' ' + esc(v));
-  if (cur.modified) parts.push('修改 ' + esc(cur.modified));
-  $('#status').innerHTML = parts.join(' · ');
-}
+function setMeta(k, v) { if (v === '' || v == null) delete meta[k]; else meta[k] = v; renderProps(); }
 
 function renderProps() {
   if (!cur || $('#side').hidden) return;
-  const rows = [['名称', cur.name], ['位置', cur.path], ['大小', cur.isDir ? cur.folderSizeText : cur.sizeText],
+  const rows = [['名称', cur.name], ['位置', cur.path], ['大小', cur.sizeText],
     ['类型', cur.isDir ? '文件夹' : (cur.ext ? cur.ext.toUpperCase() + ' 文件' : '文件')], ...Object.entries(meta),
     ['创建时间', cur.created], ['修改时间', cur.modified], ['访问时间', cur.accessed],
     ['属性', [cur.readonly && '只读', cur.hidden && '隐藏'].filter(Boolean).join('、') || '—']];
@@ -132,7 +122,11 @@ function fit(w, h, t) {
   });
 }
 // 文档类本来就上下滚动，不按 A4 整页比例（那样宽度只剩 580，字太小），取接近 1:1 的竖窗口
-const DEFAULT_SIZE = [1100, 700], PAGE_SIZE = [880, 900];
+const DEFAULT_SIZE = [880, 560], PAGE_SIZE = [800, 900];
+// PDF 内置查看器去掉顶部工具栏（页码、缩放那一条）
+const PDF_VIEW = '#toolbar=0&navpanes=0&view=FitH';
+// FitH 按不含竖滚动条的宽度算，总会多出几像素横向滚动；把 iframe 加高后裁掉底部那条横向滚动条
+const pdfFrame = url => `<div class="center"><iframe class="full pdf" src="${url}${PDF_VIEW}"></iframe></div>`;
 
 // ---------- 渲染器 ----------
 function card(info, sub) {
@@ -385,21 +379,6 @@ async function renderFont(info, t) {
     `<div style="font-size:32px">ABCDEFGHIJKLMNOPQRSTUVWXYZ<br>abcdefghijklmnopqrstuvwxyz<br>!@#$%^&*()[]{}</div></div>`;
 }
 
-function renderFolder(info) {
-  view.innerHTML = '<div class="spin">正在从 Everything 读取文件夹大小…</div>';
-}
-function folderStats(s) {
-  if (!cur || !cur.isDir || s.path !== cur.path) return;
-  cur.folderSizeText = s.sizeText || '未知';
-  if (s.files != null) setMeta('包含', `${s.files.toLocaleString()} 个文件，${s.folders.toLocaleString()} 个文件夹`);
-  else setMeta('提示', 'Everything 未运行，无法统计');
-  const max = Math.max(1, ...s.children.map(c => c.size));
-  view.innerHTML = s.children.length ? '<table class="list">' + s.children.map(c =>
-    `<tr><td class="n bar-cell"><i style="width:${(c.size / max * 100).toFixed(1)}%"></i>${c.dir ? '📁 ' : ''}${esc(c.name)}</td><td class="r">${esc(c.sizeText)}</td></tr>`).join('') + '</table>'
-    : `<div class="card"><div class="big">${esc(cur.name)}</div><div class="sub">空文件夹</div></div>`;
-  renderStatus(); renderProps();
-}
-
 async function renderFallback(info, t) {
   // 小文件嗅探一下是不是文本
   if (info.size != null && info.size < 8 << 20) {
@@ -419,11 +398,10 @@ const peek = window.peek = {
     cur = info; meta = {};
     info.kind = info.isDir ? 'folder' : (KIND[info.ext] || (/^(readme|license|makefile|dockerfile|changelog)$/i.test(info.name) ? 'text' : 'other'));
     $('#name').textContent = info.name;
-    this.position(info.index, info.total);
     $('#b-ocr').hidden = true; $('#ocrbox').hidden = true; $('#hash').textContent = '';
     $('#findbar').hidden = true;
     view.scrollTop = 0; view.scrollLeft = 0;
-    renderStatus(); renderProps();
+    renderProps();
     // 图片、视频、PPT 拿到真实尺寸后再调；文档类用竖版纸张比例，其余用默认大小
     const k = info.kind;
     if (k === 'legacy' && /^(ppt|pps|pot|dps|dpt|odp)$/.test(info.ext)) fit(1344, 768);
@@ -432,12 +410,12 @@ const peek = window.peek = {
     if (!info.exists) return card(info, '文件不存在');
     try {
       switch (info.kind) {
-        case 'folder': return renderFolder(info);
+        case 'folder': return card(info, '文件夹');
         case 'image': return renderImage(info, info.url);
         case 'thumbimg': return renderImage(info, thumbUrl(info.path, 2560), true);
         case 'video': return renderMedia(info, 'video');
         case 'audio': return renderMedia(info, 'audio');
-        case 'pdf': view.innerHTML = `<iframe class="full" src="${info.url}"></iframe>`; return;
+        case 'pdf': view.innerHTML = pdfFrame(info.url); return;
         case 'html': view.innerHTML = `<iframe class="full" sandbox="" src="${info.url}"></iframe>`; return;
         case 'md': return await renderMarkdown(info, t);
         case 'csv': return await renderCsv(info, t);
@@ -459,11 +437,10 @@ const peek = window.peek = {
   converted(r) {
     if (!cur || r.path !== cur.path) return;
     if (r.error) return card(cur, r.error);
-    view.innerHTML = `<iframe class="full" src="${r.url}#view=FitH"></iframe>`;
+    view.innerHTML = pdfFrame(r.url);
   },
   clear() { token++; view.innerHTML = ''; cur = null; },
-  position(i, n) { $('#pos').textContent = n > 1 ? `${i + 1} / ${n}` : ''; if (cur) { cur.index = i; cur.total = n; } },
-  folder: folderStats,
+  position(i, n) { if (cur) { cur.index = i; cur.total = n; } },
   setPinned(b) { pinned = b; $('#b-pin').classList.toggle('on', b); },
   hash(h) { $('#hash').textContent = h.error ? h.error : `MD5\n${h.md5}\nSHA256\n${h.sha256}`; $('#b-hash').disabled = false; },
   ocr(r) {
@@ -499,14 +476,12 @@ $('#b-info').onclick = () => { $('#side').hidden = !$('#side').hidden; $('#b-inf
 $('#b-hash').onclick = () => { $('#b-hash').disabled = true; $('#hash').textContent = '计算中…'; post('hash'); };
 $('#b-ocr').onclick = () => { $('#b-ocr').disabled = true; toast('正在识别文字…'); post('ocr'); };
 
-// 顶栏：鼠标进入窗口顶部 40px 显示，离开顶栏区域 400 ms 后收起；移出窗口也收起
-let barT = 0;
-const bar = on => { clearTimeout(barT); if (on) document.body.classList.add('bar-on'); else barT = setTimeout(() => document.body.classList.remove('bar-on'), 400); };
-document.addEventListener('mousemove', e => bar(e.clientY < 40 || ($('#bar').matches(':hover') && document.body.classList.contains('bar-on'))));
-document.documentElement.addEventListener('mouseleave', () => bar(false));
-$('#hot').addEventListener('mouseenter', () => bar(true));
-$('#bar').addEventListener('mouseenter', () => bar(true));
-$('#bar').addEventListener('mouseleave', e => { if (e.clientY >= 40) bar(false); });
+$('#b-close').onclick = () => post('close');
+// 无系统标题栏：按住顶栏空白处（不是按钮）拖动窗口
+$('#bar').addEventListener('mousedown', e => { if (e.button === 0 && !e.target.closest('button')) { e.preventDefault(); post('drag'); } });
+// 查找框有焦点时告诉原生钩子别拦空格和方向键
+$('#find-in').addEventListener('focus', () => post('typing', { on: true }));
+$('#find-in').addEventListener('blur', () => post('typing', { on: false }));
 $('#b-ocrcopy').onclick = () => navigator.clipboard.writeText($('#ocr').textContent).then(() => toast('已复制识别结果'));
 
 document.addEventListener('keydown', e => {
