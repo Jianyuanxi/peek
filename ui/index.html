@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<!-- 禁止内联脚本：预览内容（Markdown、Office 转出的 HTML）里混进的脚本不能执行，也就碰不到 window.ipc -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' http://*.peekfs data: blob:; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Peek</title>
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="vendor/hl-light.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="vendor/hl-dark.css" media="(prefers-color-scheme: dark)">
+</head>
+<body>
+<div id="hot"></div>
+<header id="bar">
+  <div id="title"><span id="name"></span><span id="pos"></span></div>
+  <div id="tools">
+    <button class="ic" id="b-ocr" title="识别图片文字" aria-label="识别图片文字" hidden><svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8h10M7 12h10M7 16h6"/></svg></button>
+    <button class="ic" id="b-find" title="查找 (Ctrl+F)" aria-label="查找"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></button>
+    <button class="ic" id="b-copy" title="复制路径 (Ctrl+C)" aria-label="复制路径"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg></button>
+    <button class="ic" id="b-open" title="用默认程序打开 (Enter)" aria-label="用默认程序打开"><svg viewBox="0 0 24 24"><path d="M14 3h7v7M21 3l-9 9"/><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/></svg></button>
+    <button class="ic" id="b-pin" title="窗口置顶 (Ctrl+T)" aria-label="窗口置顶"><svg viewBox="0 0 24 24"><path d="M12 17v5M9 10.76V6h6v4.76l2 3.24H7z"/><path d="M8 3h8"/></svg></button>
+    <button class="ic" id="b-info" title="详细信息 (I)" aria-label="详细信息"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></svg></button>
+  </div>
+</header>
+<div id="findbar" hidden><input id="find-in" placeholder="查找文字，Enter 下一个，Shift+Enter 上一个"><span id="find-st"></span></div>
+<main id="main">
+  <section id="view"></section>
+  <aside id="side" hidden>
+    <table id="props"></table>
+    <div id="hashbox"><button id="b-hash">计算 MD5 / SHA256</button><pre id="hash"></pre></div>
+    <div id="ocrbox" hidden><div class="ocr-h">识别结果 <button id="b-ocrcopy">复制</button></div><pre id="ocr"></pre></div>
+  </aside>
+</main>
+<footer id="status"></footer>
+<div id="toast" hidden></div>
+<script src="vendor/jszip.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

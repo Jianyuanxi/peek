@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "ui/app.js"
+        ],
+        "createdAt": "2026-10-19T09:22:18.388Z",
+        "reason": "Claude: img src is assigned by script immediately after insertion (renderImage)"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "ui/app.css"
+        ],
+        "createdAt": "2026-10-19T09:34:40.634Z",
+        "reason": "Claude: L64 is the Markdown blockquote rule (neutral --line color, same convention as GitHub rendering), not a card accent"
+      }
+    ]
+  }
+}
