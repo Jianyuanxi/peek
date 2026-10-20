@@ -144,37 +144,79 @@ pub fn dark_mode() -> bool {
     }
 }
 
-/// 改名前的自启项（值名 Peek）删掉，不然开机会再起一个旧 exe
+// 自启用"启动"文件夹里的快捷方式，不用 HKCU\...\Run：本机（Win11 26300）开机时 Explorer 跳过了新写入的 Run 项
+// （Shell-Core 日志里 QuickView、QuickCopy 都没有"已开始执行命令"，同次开机 Span、Everything 都执行了），
+// 启动文件夹快捷方式同次开机正常启动。"设置 > 启动应用"关掉后系统在 StartupApproved\StartupFolder 记一个奇数首字节。
+const APPROVED_RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
+const APPROVED_LNK: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder";
+const LNK_NAME: &str = "QuickView.lnk";
+
+/// 旧的 Run 自启项（改名前的 Peek 和之前版本的 QuickView）连同它们在 StartupApproved 里的记录一起删掉，
+/// 不删的话开机会多起一个，或"设置 > 启动应用"留一条孤儿项
 pub fn remove_old_autostart() {
     unsafe {
-        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, &HSTRING::from(RUN_KEY), &HSTRING::from("Peek"));
+        for n in ["Peek", RUN_NAME] {
+            let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, &HSTRING::from(RUN_KEY), &HSTRING::from(n));
+            let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, &HSTRING::from(APPROVED_RUN), &HSTRING::from(n));
+        }
     }
 }
 
-pub fn autostart_enabled() -> bool {
+fn startup_lnk() -> Option<std::path::PathBuf> {
     unsafe {
-        let mut sz = 0u32;
-        RegGetValueW(HKEY_CURRENT_USER, &HSTRING::from(RUN_KEY), &HSTRING::from(RUN_NAME), RRF_RT_REG_SZ, None, None, Some(&mut sz)).is_ok()
+        let p = SHGetKnownFolderPath(&FOLDERID_Startup, KF_FLAG_DEFAULT, None).ok()?;
+        let s = p.to_string().ok();
+        windows::Win32::System::Com::CoTaskMemFree(Some(p.0 as _));
+        Some(std::path::PathBuf::from(s?).join(LNK_NAME))
     }
 }
 
+/// 快捷方式在，且没被"设置 > 启动应用"关掉
+pub fn autostart_enabled() -> bool {
+    if !startup_lnk().is_some_and(|p| p.exists()) {
+        return false;
+    }
+    unsafe {
+        let mut b = [0u8; 12];
+        let mut sz = 12u32;
+        let ok = RegGetValueW(HKEY_CURRENT_USER, &HSTRING::from(APPROVED_LNK), &HSTRING::from(LNK_NAME), RRF_RT_REG_BINARY, None, Some(b.as_mut_ptr() as _), Some(&mut sz)).is_ok();
+        !ok || b[0] & 1 == 0
+    }
+}
+
+/// 第一次运行时调用：快捷方式不在才建，不动用户在"设置"里的开关
+pub fn ensure_autostart() {
+    if startup_lnk().is_some_and(|p| !p.exists()) {
+        let _ = write_lnk();
+    }
+}
+
+fn write_lnk() -> windows::core::Result<()> {
+    use windows::core::Interface;
+    use windows::Win32::System::Com::*;
+    let lnk = startup_lnk().ok_or(windows::core::Error::empty())?;
+    let exe = std::env::current_exe().unwrap_or_default();
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let sl: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
+        sl.SetPath(&HSTRING::from(exe.as_os_str()))?;
+        if let Some(d) = exe.parent() {
+            sl.SetWorkingDirectory(&HSTRING::from(d.as_os_str()))?;
+        }
+        sl.SetDescription(&HSTRING::from("QuickView 快速预览"))?;
+        sl.cast::<IPersistFile>()?.Save(&HSTRING::from(lnk.as_os_str()), true)
+    }
+}
+
+/// 托盘菜单开关：打开时建快捷方式并清掉"设置"里的禁用记录，关闭时删掉快捷方式
 pub fn set_autostart(on: bool) {
     unsafe {
-        if on {
-            let exe = std::env::current_exe().unwrap_or_default();
-            let v = format!("\"{}\"", exe.display());
-            let w: Vec<u16> = v.encode_utf16().chain(Some(0)).collect();
-            let _ = RegSetKeyValueW(
-                HKEY_CURRENT_USER,
-                &HSTRING::from(RUN_KEY),
-                &HSTRING::from(RUN_NAME),
-                REG_SZ.0,
-                Some(w.as_ptr() as _),
-                (w.len() * 2) as u32,
-            );
-        } else {
-            let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, &HSTRING::from(RUN_KEY), &HSTRING::from(RUN_NAME));
-        }
+        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, &HSTRING::from(APPROVED_LNK), &HSTRING::from(LNK_NAME));
+    }
+    if on {
+        let _ = write_lnk();
+    } else if let Some(p) = startup_lnk() {
+        let _ = std::fs::remove_file(p);
     }
 }
 

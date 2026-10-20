@@ -411,8 +411,8 @@ fn main() {
     native::remove_old_autostart();
     let _ = std::fs::create_dir_all(&data);
     let off_flag = data.join("autostart.off");
-    if !off_flag.exists() && !native::autostart_enabled() {
-        native::set_autostart(true);
+    if !off_flag.exists() {
+        native::ensure_autostart();
     }
     // WebView2 以前自动下载的组件（DRM、广告过滤规则等，约 57 MB，预览用不到）现在用 --disable-component-update 关掉了，
     // 留下的在创建 WebView2 之前删掉：WebView2 一启动就会从 component_crx_cache 把它们装回去并占住文件

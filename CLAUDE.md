@@ -6,6 +6,7 @@ Windows 上资源管理器选中文件按空格预览。Rust（tao + wry/WebView
 
 - **名字是 QuickView**（用户定的；不直接叫 QuickLook，避免和原版 QL-Win 混淆）。exe、窗口标题、托盘、自启项 `QuickView`、数据目录 `%LOCALAPPDATA%\QuickView`（`info::data_dir`），启动时把旧 `Peek` 目录改名迁过来并删掉旧自启项。页面内部的 `peek` 协议、`window.peek`、`.peekfs` 不是用户可见的，没改。
 - **图标**用 `assets/app.svg`（浅灰文档 + 灰蓝放大镜，低对比，用户选的 A2），`assets/app.ico` 由它渲染出 16–256 九个尺寸，`build.rs` 用 embed-resource 嵌成资源 1；窗口、任务栏、托盘都 `from_resource(1)`。
+- **自启用启动文件夹快捷方式 `QuickView.lnk`，不要改回 HKCU `Run`**：本机开机时 Explorer 跳过了新写入的 Run 项（Shell-Core/Operational 日志 9707 里没有它，同次开机的 Span 等都执行了；补上 `RunNotification\StartupTNoti<名字>=1` 也照样跳过，已实测），快捷方式能正常启动（2026-10-20 重启验证）。启动时把旧的 `Run\Peek`、`Run\QuickView` 及其 `StartupApproved\Run` 记录删掉；“设置 > 启动应用”里关掉会在 `StartupApproved\StartupFolder\QuickView.lnk` 写奇数首字节，`autostart_enabled` 要认这个；首次运行只在快捷方式不存在时创建，不覆盖用户在设置里的开关。
 - 开机自启、常驻，**空闲内存尽量小**：WebView2 按需创建，隐藏 `RELEASE_AFTER`（默认 300 秒）后释放。
 - **速度第一，任何格式都是**（"和用 WPS 打开一样慢就没意义"）。PDF 不用 WebView2 内置查看器（要读完整个文件，80 MB 教材 5 秒），用 `native::pdf_render`（Windows.Data.Pdf）按页渲染 JPEG、只加载滚到附近的页，大文件 0.1–0.5 秒出第一页；只有系统渲染失败（加密等）才退回内置查看器。
 - 空格出预览要快、不卡；Office 预览**速度优先**，清晰度可以比原版低，但要看得清内容（用户只是先看一眼，细看会用 WPS 打开）。
@@ -28,7 +29,7 @@ Windows 上资源管理器选中文件按空格预览。Rust（tao + wry/WebView
 
 ## 结构
 
-- `src/native.rs`：低级键盘钩子（Explorer/桌面文件列表有焦点时拦空格；Peek 自己在前台时拦空格/Esc/↑/↓）、抢前台、自启注册表、系统缩略图（`/thumb`）、OCR、第二实例 WM_COPYDATA 传路径。
+- `src/native.rs`：低级键盘钩子（Explorer/桌面文件列表有焦点时拦空格；Peek 自己在前台时拦空格/Esc/↑/↓）、抢前台、自启（启动文件夹快捷方式）、系统缩略图（`/thumb`）、OCR、第二实例 WM_COPYDATA 传路径。
 - `src/shell.rs`：IShellWindows 取当前标签页选中项、视图全部项、同步选中。
 - `src/info.rs`：大小/时间格式化、哈希、旧版 Office 经 LibreOffice 转 PDF（缓存在 `%LOCALAPPDATA%\QuickView\cache`，`clean_cache` 按 30 天 / 300 MB 最近使用回收，残留 tmp 目录 10 分钟后删）。
 - WebView2 用户数据在 `%LOCALAPPDATA%\QuickView\WebView2`：已加 `--disable-component-update` 关掉组件下载（DRM、广告过滤规则，约 57 MB），残留组件在**创建 WebView 之前**同步删除（WebView2 起来后会从 crx cache 装回并占住文件）。`with_additional_browser_args` 会替换 wry 的默认参数，默认的 `--disable-features=...` 要一并写上。
