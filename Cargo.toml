@@ -1,7 +1,11 @@
 [package]
-name = "peek"
+name = "quickview"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
+
+[build-dependencies]
+embed-resource = "3"
 
 [dependencies]
 tao = "0.37"

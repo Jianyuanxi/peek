@@ -198,7 +198,7 @@ pub fn convert_pdf(path: &str) -> Result<String, String> {
     let md = std::fs::metadata(path).map_err(|e| e.to_string())?;
     let mut h = std::collections::hash_map::DefaultHasher::new();
     (path, md.len(), md.last_write_time()).hash(&mut h);
-    let base = std::path::PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_default()).join("Peek");
+    let base = data_dir();
     let cache = base.join("cache");
     let _ = std::fs::create_dir_all(&cache);
     let out = cache.join(format!("{:016x}.pdf", h.finish()));
@@ -238,7 +238,7 @@ pub fn convert_pdf(path: &str) -> Result<String, String> {
 pub fn clean_cache() {
     const KEEP: std::time::Duration = std::time::Duration::from_secs(30 * 86400);
     const MAX: u64 = 300 << 20;
-    let dir = std::path::PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_default()).join("Peek").join("cache");
+    let dir = data_dir().join("cache");
     let Ok(rd) = std::fs::read_dir(&dir) else { return };
     let now = std::time::SystemTime::now();
     let mut files = vec![];
@@ -281,4 +281,9 @@ mod tests {
     fn url_encode() {
         assert_eq!(file_url("C:\\a b\\中.txt"), "http://c.peekfs/a%20b/%E4%B8%AD.txt");
     }
+}
+
+/// 数据目录 %LOCALAPPDATA%\QuickView（缓存、WebView2、crash.log、自启开关标记）
+pub fn data_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_default()).join("QuickView")
 }

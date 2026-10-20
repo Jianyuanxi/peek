@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use tao::dpi::{LogicalSize, PhysicalPosition};
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
-use tao::platform::windows::{WindowBuilderExtWindows, WindowExtWindows};
-use tao::window::{Window, WindowBuilder};
+use tao::platform::windows::{IconExtWindows, WindowBuilderExtWindows, WindowExtWindows};
+use tao::window::{Icon, Window, WindowBuilder};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem};
 use tray_icon::TrayIconBuilder;
 use wry::{http::Response, WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows};
@@ -121,7 +121,8 @@ struct App {
     ctx: WebContext,
     webview: Option<WebView>,
     ready: bool,
-    pending: Option<String>,
+    // 页面就绪前要执行的脚本按顺序排队（show 之后紧跟 position，只留一条会把 show 覆盖掉，冷启动时窗口空白）
+    pending: Vec<String>,
     items: Vec<String>,
     index: usize,
     prev_fg: isize,
@@ -152,6 +153,7 @@ impl App {
         map_drives(&wv);
         self.webview = Some(wv);
         self.ready = false;
+        self.pending.clear();
     }
 
     fn eval(&mut self, js: String) {
@@ -159,7 +161,7 @@ impl App {
             (Some(w), true) => {
                 let _ = w.evaluate_script(&js);
             }
-            _ => self.pending = Some(js),
+            _ => self.pending.push(js),
         }
     }
 
@@ -167,7 +169,7 @@ impl App {
     fn show_current(&mut self) {
         let Some(path) = self.items.get(self.index).cloned() else { return };
         let v = info::basic(&path, self.index, self.items.len());
-        self.window.set_title(v["name"].as_str().unwrap_or("Peek"));
+        self.window.set_title(v["name"].as_str().unwrap_or("QuickView"));
         let f = |k: &str| v[k].as_f64().unwrap_or(0.0);
         self.resize(f("pw"), f("ph"), f("pr"));
         self.eval(format!("peek.show({})", v));
@@ -254,7 +256,7 @@ impl App {
         match cmd {
             "ready" => {
                 self.ready = true;
-                if let Some(js) = self.pending.take() {
+                for js in std::mem::take(&mut self.pending) {
                     self.eval(js);
                 }
                 let js = format!("peek.setPinned({})", self.pinned);
@@ -285,7 +287,8 @@ impl App {
             "hash" => {
                 let p = self.proxy.clone();
                 std::thread::spawn(move || {
-                    let h = info::hashes(&cur);
+                    let mut h = info::hashes(&cur);
+                    h["path"] = cur.into();
                     let _ = p.send_event(UserEvent::Js(format!("peek.hash({})", h)));
                 });
             }
@@ -338,28 +341,7 @@ fn map_drives(wv: &WebView) {
     }
 }
 
-fn tray_icon_rgba() -> tray_icon::Icon {
-    // 32x32 圆角方块 + 眼睛
-    let n = 32usize;
-    let mut px = vec![0u8; n * n * 4];
-    for y in 0..n {
-        for x in 0..n {
-            let (fx, fy) = (x as f32 - 15.5, y as f32 - 15.5);
-            let i = (y * n + x) * 4;
-            let inside = fx.abs() < 15.0 && fy.abs() < 15.0 && !(fx.abs() > 11.0 && fy.abs() > 11.0 && (fx.abs() - 11.0).hypot(fy.abs() - 11.0) > 4.0);
-            if !inside {
-                continue;
-            }
-            let eye = (fx / 12.0).powi(2) + (fy / 7.0).powi(2) < 1.0;
-            let pupil = fx.hypot(fy) < 4.5;
-            let c: [u8; 3] = if pupil { [30, 64, 175] } else if eye { [255, 255, 255] } else { [37, 99, 235] };
-            px[i..i + 4].copy_from_slice(&[c[0], c[1], c[2], 255]);
-        }
-    }
-    tray_icon::Icon::from_rgba(px, n as u32, n as u32).unwrap()
-}
-
-/// 自检：列出所有资源管理器窗口的选中项，写到 %TEMP%\peek-selftest.txt
+/// 自检：列出所有资源管理器窗口的选中项，写到 %TEMP%\quickview-selftest.txt
 fn selftest() {
     use windows::Win32::UI::WindowsAndMessaging::{FindWindowExW, GetWindowThreadProcessId};
     let mut out = String::new();
@@ -381,14 +363,14 @@ fn selftest() {
             }
         }
     }
-    let _ = std::fs::write(std::env::temp_dir().join("peek-selftest.txt"), out);
+    let _ = std::fs::write(std::env::temp_dir().join("quickview-selftest.txt"), out);
 }
 
 fn single_instance() -> bool {
     use windows::core::HSTRING;
     use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
     unsafe {
-        let _ = windows::Win32::System::Threading::CreateMutexW(None, true, &HSTRING::from("Local\\PeekQuickLookSingleton"));
+        let _ = windows::Win32::System::Threading::CreateMutexW(None, true, &HSTRING::from("Local\\QuickViewSingleton"));
         GetLastError() != ERROR_ALREADY_EXISTS
     }
 }
@@ -409,7 +391,7 @@ fn main() {
     }
     // panic=abort 下进程会静默退出，先把原因记到 %LOCALAPPDATA%\Peek\crash.log
     std::panic::set_hook(Box::new(|i| {
-        let f = std::path::PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_default()).join("Peek").join("crash.log");
+        let f = info::data_dir().join("crash.log");
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
         if let Ok(mut fh) = std::fs::OpenOptions::new().create(true).append(true).open(f) {
             use std::io::Write;
@@ -420,7 +402,13 @@ fn main() {
     let proxy = event_loop.create_proxy();
 
     // 首次运行默认开机自启；用户在托盘关掉后写一个标记，不再自动打开
-    let data = std::path::PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_default()).join("Peek");
+    // 旧名 Peek 的数据目录和自启项迁过来
+    let data = info::data_dir();
+    let old = data.with_file_name("Peek");
+    if old.is_dir() && !data.exists() {
+        let _ = std::fs::rename(&old, &data);
+    }
+    native::remove_old_autostart();
     let _ = std::fs::create_dir_all(&data);
     let off_flag = data.join("autostart.off");
     if !off_flag.exists() && !native::autostart_enabled() {
@@ -503,11 +491,13 @@ fn main() {
     }
 
     let window = WindowBuilder::new()
-        .with_title("Peek")
+        .with_title("QuickView")
         .with_visible(false)
         .with_inner_size(LogicalSize::new(880.0, 600.0))
         .with_decorations(false)
         .with_undecorated_shadow(true)
+        .with_window_icon(Icon::from_resource(1, None).ok())
+        .with_taskbar_icon(Icon::from_resource(1, None).ok())
         .with_min_inner_size(LogicalSize::new(300.0, 200.0))
         .build(&event_loop)
         .unwrap();
@@ -518,13 +508,16 @@ fn main() {
         let _ = SetWindowPos(hwnd_of(&window), None, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
+    // 托盘图标按系统小图标尺寸（随缩放）从 exe 资源里取对应那一帧
+    let tray_px = (16.0 * window.scale_factor()).round() as u32;
+    let tray_icon = tray_icon::Icon::from_resource(1, Some((tray_px, tray_px))).expect("exe 缺少图标资源");
     let menu = Menu::new();
     let auto_item = CheckMenuItem::new("开机自启", true, native::autostart_enabled(), None);
     let quit_item = MenuItem::new("退出", true, None);
     let _ = menu.append(&auto_item);
     let _ = menu.append(&quit_item);
     // 开机自启时任务栏可能还没起来，托盘创建会失败；失败不退出，前两分钟每 2 秒重试一次，之后跟着 Tick 重试
-    let make_tray = move || TrayIconBuilder::new().with_menu(Box::new(menu.clone())).with_tooltip("Peek 快速预览（资源管理器里选中文件按空格）").with_icon(tray_icon_rgba()).build().ok();
+    let make_tray = move || TrayIconBuilder::new().with_menu(Box::new(menu.clone())).with_tooltip("QuickView 快速预览（资源管理器里选中文件按空格）").with_icon(tray_icon.clone()).build().ok();
     let mut tray = make_tray();
     if tray.is_none() {
         let p = proxy.clone();
@@ -549,7 +542,7 @@ fn main() {
         ctx: WebContext::new(Some(data.join("WebView2"))),
         webview: None,
         ready: false,
-        pending: None,
+        pending: Vec::new(),
         items: vec![],
         index: 0,
         prev_fg: 0,

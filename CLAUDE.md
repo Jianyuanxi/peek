@@ -1,9 +1,11 @@
-# Peek — QuickLook 替代品
+# QuickView — QuickLook 替代品（原名 Peek）
 
 Windows 上资源管理器选中文件按空格预览。Rust（tao + wry/WebView2）单 exe，界面在 `ui/`，编译时用 `include_bytes!` 打进 exe。
 
 ## 用户定下的约束（不要回退）
 
+- **名字是 QuickView**（用户定的；不直接叫 QuickLook，避免和原版 QL-Win 混淆）。exe、窗口标题、托盘、自启项 `QuickView`、数据目录 `%LOCALAPPDATA%\QuickView`（`info::data_dir`），启动时把旧 `Peek` 目录改名迁过来并删掉旧自启项。页面内部的 `peek` 协议、`window.peek`、`.peekfs` 不是用户可见的，没改。
+- **图标**用 `assets/app.svg`（浅灰文档 + 灰蓝放大镜，低对比，用户选的 A2），`assets/app.ico` 由它渲染出 16–256 九个尺寸，`build.rs` 用 embed-resource 嵌成资源 1；窗口、任务栏、托盘都 `from_resource(1)`。
 - 开机自启、常驻，**空闲内存尽量小**：WebView2 按需创建，隐藏 `RELEASE_AFTER`（默认 300 秒）后释放。
 - **速度第一，任何格式都是**（"和用 WPS 打开一样慢就没意义"）。PDF 不用 WebView2 内置查看器（要读完整个文件，80 MB 教材 5 秒），用 `native::pdf_render`（Windows.Data.Pdf）按页渲染 JPEG、只加载滚到附近的页，大文件 0.1–0.5 秒出第一页；只有系统渲染失败（加密等）才退回内置查看器。
 - 空格出预览要快、不卡；Office 预览**速度优先**，清晰度可以比原版低，但要看得清内容（用户只是先看一眼，细看会用 WPS 打开）。
@@ -21,21 +23,22 @@ Windows 上资源管理器选中文件按空格预览。Rust（tao + wry/WebView
 - 文档类（docx/pdf/pptx）按原字体显示；代码和纯文本照原版用 14px Consolas + 微软雅黑 UI（`<code>` 要 `font: inherit`，否则落到宋体）。
 - Markdown 正文用 `vendor/github-markdown.css`（同原版），目录照原版 178px 浅灰底、树状缩进、当前章节左侧蓝条。
 - `vendor/pptx-preview.umd.js` 打过补丁（搜 `Peek 补丁`）：原库不处理图片的 rot/flipH/flipV。升级该库要重新打。
-- 开机自启时托盘可能建不起来（任务栏未就绪），托盘创建失败不能 `unwrap`，要重试；panic 写 `%LOCALAPPDATA%\Peek\crash.log`。
+- 开机自启时托盘可能建不起来（任务栏未就绪），托盘创建失败不能 `unwrap`，要重试；panic 写 `%LOCALAPPDATA%\QuickView\crash.log`。
 - 已做的功能：Enter 打开、Ctrl+C 复制路径、窗口置顶、Ctrl+F 查找、MD5/SHA256、图片 OCR（Windows.Media.Ocr）、文字可选中复制。
 
 ## 结构
 
 - `src/native.rs`：低级键盘钩子（Explorer/桌面文件列表有焦点时拦空格；Peek 自己在前台时拦空格/Esc/↑/↓）、抢前台、自启注册表、系统缩略图（`/thumb`）、OCR、第二实例 WM_COPYDATA 传路径。
 - `src/shell.rs`：IShellWindows 取当前标签页选中项、视图全部项、同步选中。
-- `src/info.rs`：大小/时间格式化、哈希、旧版 Office 经 LibreOffice 转 PDF（缓存在 `%LOCALAPPDATA%\Peek\cache`，`clean_cache` 按 30 天 / 300 MB 最近使用回收，残留 tmp 目录 10 分钟后删）。
-- WebView2 用户数据在 `%LOCALAPPDATA%\Peek\WebView2`：已加 `--disable-component-update` 关掉组件下载（DRM、广告过滤规则，约 57 MB），残留组件在**创建 WebView 之前**同步删除（WebView2 起来后会从 crx cache 装回并占住文件）。`with_additional_browser_args` 会替换 wry 的默认参数，默认的 `--disable-features=...` 要一并写上。
+- `src/info.rs`：大小/时间格式化、哈希、旧版 Office 经 LibreOffice 转 PDF（缓存在 `%LOCALAPPDATA%\QuickView\cache`，`clean_cache` 按 30 天 / 300 MB 最近使用回收，残留 tmp 目录 10 分钟后删）。
+- WebView2 用户数据在 `%LOCALAPPDATA%\QuickView\WebView2`：已加 `--disable-component-update` 关掉组件下载（DRM、广告过滤规则，约 57 MB），残留组件在**创建 WebView 之前**同步删除（WebView2 起来后会从 crx cache 装回并占住文件）。`with_additional_browser_args` 会替换 wry 的默认参数，默认的 `--disable-features=...` 要一并写上。
 - `ui/app.js`：按扩展名分派渲染器；docx 用 docx-preview，xlsx/xls 用 SheetJS，pptx 用 pptx-preview，md 用 marked，代码用 highlight.js，PDF 用 Windows.Data.Pdf 按页渲染（`/pdfinfo`、`/pdfpage`，异步协议在后台线程处理）。
 - 本地文件通过 `SetVirtualHostNameToFolderMapping` 映射成 `http://<盘符>.peekfs/...`。
 
 ## 调试
 
-- `peek.exe <路径>`：交给已运行实例预览；`peek.exe --selftest`：把所有资源管理器窗口的选中项写到 `%TEMP%\peek-selftest.txt`。
+- 页面就绪前的脚本在 `App::pending` 里**按顺序排队**：冷启动（开机后、闲置释放后第一次）时 `peek.show` 后面紧跟 `peek.position`，只留一条会把 show 覆盖、窗口空白。
+- `QuickView.exe <路径>`：交给已运行实例预览；`QuickView.exe --selftest`：把所有资源管理器窗口的选中项写到 `%TEMP%\quickview-selftest.txt`。
 - 带 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333` 启动可用 CDP 连页面。
 - `PEEK_RELEASE_SECS` 环境变量可缩短 WebView2 释放时间。
 - 页面里不能声明全局 `ipc`（与 wry 注入的 `window.ipc` 冲突），发消息用 `post()`。

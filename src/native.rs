@@ -131,7 +131,7 @@ pub fn monitor_work_area(h: isize) -> Option<(i32, i32, i32, i32)> {
 }
 
 const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-const RUN_NAME: &str = "Peek";
+const RUN_NAME: &str = "QuickView";
 
 /// 系统"应用模式"是否为深色：WebView2 底色要和页面一致，否则页面画出来之前会闪一下别的颜色
 pub fn dark_mode() -> bool {
@@ -141,6 +141,13 @@ pub fn dark_mode() -> bool {
         let k = HSTRING::from(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
         let ok = RegGetValueW(HKEY_CURRENT_USER, &k, &HSTRING::from("AppsUseLightTheme"), RRF_RT_REG_DWORD, None, Some(&mut v as *mut u32 as *mut _), Some(&mut sz)).is_ok();
         ok && v == 0
+    }
+}
+
+/// 改名前的自启项（值名 Peek）删掉，不然开机会再起一个旧 exe
+pub fn remove_old_autostart() {
+    unsafe {
+        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, &HSTRING::from(RUN_KEY), &HSTRING::from("Peek"));
     }
 }
 
@@ -268,8 +275,10 @@ static PDF: std::sync::Mutex<Option<(String, windows::Data::Pdf::PdfDocument)>> 
 fn pdf_doc(path: &str) -> windows::core::Result<windows::Data::Pdf::PdfDocument> {
     use windows::Data::Pdf::PdfDocument;
     use windows::Storage::StorageFile;
+    // 同路径文件被改写后要重新打开：键里带上大小和修改时间
+    let key = std::fs::metadata(path).map(|m| format!("{path}|{}|{:?}", m.len(), m.modified().ok())).unwrap_or_else(|_| path.to_string());
     if let Some((p, d)) = PDF.lock().unwrap().as_ref() {
-        if p == path {
+        if *p == key {
             return Ok(d.clone());
         }
     }
@@ -278,7 +287,7 @@ fn pdf_doc(path: &str) -> windows::core::Result<windows::Data::Pdf::PdfDocument>
     }
     let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path))?.join()?;
     let doc = PdfDocument::LoadFromFileAsync(&file)?.join()?;
-    *PDF.lock().unwrap() = Some((path.to_string(), doc.clone()));
+    *PDF.lock().unwrap() = Some((key, doc.clone()));
     Ok(doc)
 }
 
@@ -390,7 +399,7 @@ fn squeeze_cjk(s: &str) -> String {
 // ---------- 进程间：第二个实例把路径交给常驻实例 ----------
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 static IPC_TX: OnceLock<Sender<String>> = OnceLock::new();
-const IPC_CLASS: &str = "PeekIPCWindow";
+const IPC_CLASS: &str = "QuickViewIPCWindow";
 
 unsafe extern "system" fn ipc_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if m == WM_COPYDATA {

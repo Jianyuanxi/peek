@@ -25,7 +25,7 @@ const HL_LANG = { rs: 'rust', py: 'python', js: 'javascript', mjs: 'javascript',
   bat: 'dos', cmd: 'dos', yml: 'yaml', toml: 'ini', cfg: 'ini', conf: 'ini', vue: 'xml', html: 'xml', xaml: 'xml', csproj: 'xml', svg: 'xml',
   md: 'markdown', ets: 'typescript', rb: 'ruby', pl: 'perl', m: 'objectivec', jsonc: 'json', json5: 'json', ipynb: 'json', gradle: 'groovy', tf: 'ini' };
 
-let cur = null, token = 0, meta = {}, pinned = false;
+let cur = null, curFont = null, token = 0, meta = {}, pinned = false;
 const view = $('#view');
 
 const loaded = {};
@@ -79,8 +79,10 @@ function decode(buf) {
   try { return [new TextDecoder('utf-8', { fatal: true }).decode(buf), buf[0] === 0xEF ? 'UTF-8 BOM' : 'UTF-8']; }
   catch (e) {
     // 截断可能切断多字节字符：去掉末尾几个字节再试一次
-    try { return [new TextDecoder('utf-8', { fatal: true }).decode(buf.subarray(0, buf.length - 3)), 'UTF-8']; }
-    catch (e2) { return [new TextDecoder('gbk').decode(buf), 'GBK']; }
+    for (let k = 1; k <= 3; k++) {
+      try { return [new TextDecoder('utf-8', { fatal: true }).decode(buf.subarray(0, buf.length - k)), 'UTF-8']; } catch (e2) {}
+    }
+    return [new TextDecoder('gbk').decode(buf), 'GBK'];
   }
 }
 const buffer = url => fetch(url).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); });
@@ -139,10 +141,11 @@ function renderImage(info, src, isThumb) {
   const img = view.querySelector('img'), wrap = view.firstChild;
   const t = token;
   img.onload = () => {
+    if (t !== token) return;
     if (!isThumb) setMeta('尺寸', img.naturalWidth + ' × ' + img.naturalHeight);
     fit(img.naturalWidth, img.naturalHeight, t);
   };
-  img.onerror = () => { if (!isThumb) renderImage(info, thumbUrl(info.path, 2048), true); else card(info, '无法解码此图片'); };
+  img.onerror = () => { if (t !== token) return; if (!isThumb) renderImage(info, thumbUrl(info.path, 2048), true); else card(info, '无法解码此图片'); };
   img.src = src;
   let scale = 0;
   const apply = () => {
@@ -166,7 +169,7 @@ function renderImage(info, src, isThumb) {
   }, { passive: false });
   let drag = null;
   wrap.addEventListener('mousedown', e => { drag = { x: e.clientX, y: e.clientY, l: wrap.scrollLeft, t: wrap.scrollTop }; });
-  window.addEventListener('mouseup', () => drag = null);
+  window.onmouseup = () => drag = null;
   wrap.addEventListener('mousemove', e => { if (drag) { wrap.scrollLeft = drag.l - (e.clientX - drag.x); wrap.scrollTop = drag.t - (e.clientY - drag.y); } });
   $('#b-ocr').hidden = false;
 }
@@ -176,16 +179,18 @@ function renderMedia(info, tag) {
   const m = view.querySelector(tag);
   const t = token;
   m.onloadedmetadata = () => {
+    if (t !== token) return;
     setMeta('时长', fmtDur(m.duration));
     if (tag === 'video' && m.videoWidth) { setMeta('分辨率', m.videoWidth + ' × ' + m.videoHeight); fit(m.videoWidth, m.videoHeight, t); }
   };
-  m.onerror = () => card(info, '内置播放器不支持此编码，按 Enter 用默认播放器打开');
+  m.onerror = () => t === token && card(info, '内置播放器不支持此编码，按 Enter 用默认播放器打开');
 }
 
 async function renderText(info, t) {
   const max = info.ext === 'json' || info.ext === 'ipynb' ? 8 << 20 : 2 << 20;
   const { buf, truncated } = await readHead(info.url, max);
   if (t !== token) return;
+  if (!buf.length) return card(info, '空文件');
   const [text, enc] = decode(buf);
   setMeta('编码', enc);
   let lines = 1; for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) lines++;
@@ -368,9 +373,9 @@ async function renderZip(info, t) {
 
 async function renderFont(info, t) {
   const ff = new FontFace('peekfont' + t, `url("${info.url}")`);
-  try { await ff.load(); } catch (e) { return card(info, '无法加载字体'); }
+  try { await ff.load(); } catch (e) { return t === token && card(info, '无法加载字体'); }
   if (t !== token) return;
-  document.fonts.add(ff);
+  document.fonts.add(ff); curFont = ff;
   const s = 'The quick brown fox jumps over the lazy dog 0123456789 永和九年，岁在癸丑，暮春之初';
   view.innerHTML = `<div class="font-sample" style="font-family:'peekfont${t}'">` +
     [12, 16, 24, 36, 48, 72].map(px => `<div style="font-size:${px}px">${s}</div>`).join('') +
@@ -383,7 +388,8 @@ const peek = window.peek = {
     const t = ++token;
     cur = info; meta = {};
     $('#name').textContent = info.name;
-    $('#b-ocr').hidden = true; setPop('ocrpop', false); $('#hash').textContent = '';
+    $('#b-ocr').hidden = true; setPop('ocrpop', false); $('#hash').textContent = ''; $('#b-hash').disabled = false;
+    if (curFont) { document.fonts.delete(curFont); curFont = null; }
     showFind(false);
     view.scrollTop = 0; view.scrollLeft = 0;
     renderProps();
@@ -422,7 +428,7 @@ const peek = window.peek = {
   clear() { token++; view.innerHTML = ''; cur = null; },
   position(i, n) { if (cur) { cur.index = i; cur.total = n; } },
   setPinned(b) { pinned = b; $('#b-pin').classList.toggle('on', b); },
-  hash(h) { $('#hash').textContent = h.error ? h.error : `MD5\n${h.md5}\nSHA256\n${h.sha256}`; $('#b-hash').disabled = false; },
+  hash(h) { if (h.path !== cur?.path) return; $('#hash').textContent = h.error ? h.error : `MD5\n${h.md5}\nSHA256\n${h.sha256}`; $('#b-hash').disabled = false; },
   ocr(r) {
     $('#b-ocr').disabled = false;
     if (!cur || r.path && r.path !== cur.path) return;
