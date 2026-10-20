@@ -203,6 +203,8 @@ pub fn convert_pdf(path: &str) -> Result<String, String> {
     let _ = std::fs::create_dir_all(&cache);
     let out = cache.join(format!("{:016x}.pdf", h.finish()));
     if out.exists() {
+        // 命中时把修改时间刷新成现在，清理按"最近用过"保留
+        let _ = std::fs::File::options().write(true).open(&out).and_then(|f| f.set_modified(std::time::SystemTime::now()));
         return Ok(out.to_string_lossy().to_string());
     }
     let soffice = [r"C:\Program Files\LibreOffice\program\soffice.exe", r"C:\Program Files (x86)\LibreOffice\program\soffice.exe"]
@@ -227,7 +229,41 @@ pub fn convert_pdf(path: &str) -> Result<String, String> {
         None => Err(format!("转换失败（LibreOffice 退出码 {:?}）", st.code())),
     };
     let _ = std::fs::remove_dir_all(&tmp);
+    clean_cache();
     r
+}
+
+/// 转换缓存清理：30 天没用过的删掉，总量超过 300 MB 时从最久没用的删起；顺带删掉中途崩溃留下的 tmp 目录。
+/// 启动时和每次转换后各跑一次。源文件改过后哈希会变，旧 PDF 就成了没人用的，靠这里回收
+pub fn clean_cache() {
+    const KEEP: std::time::Duration = std::time::Duration::from_secs(30 * 86400);
+    const MAX: u64 = 300 << 20;
+    let dir = std::path::PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_default()).join("Peek").join("cache");
+    let Ok(rd) = std::fs::read_dir(&dir) else { return };
+    let now = std::time::SystemTime::now();
+    let mut files = vec![];
+    for e in rd.flatten() {
+        let (p, Ok(md)) = (e.path(), e.metadata()) else { continue };
+        let age = md.modified().ok().and_then(|t| now.duration_since(t).ok()).unwrap_or_default();
+        if md.is_dir() {
+            // 十分钟内的 tmp 目录可能正在转换，别删
+            if age > std::time::Duration::from_secs(600) {
+                let _ = std::fs::remove_dir_all(&p);
+            }
+        } else if age > KEEP {
+            let _ = std::fs::remove_file(&p);
+        } else {
+            files.push((age, md.len(), p));
+        }
+    }
+    files.sort_by(|a, b| a.0.cmp(&b.0)); // 最近用过的在前
+    let mut total = 0;
+    for (_, len, p) in files {
+        total += len;
+        if total > MAX {
+            let _ = std::fs::remove_file(&p);
+        }
+    }
 }
 
 #[cfg(test)]

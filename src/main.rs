@@ -14,7 +14,7 @@ use tao::platform::windows::{WindowBuilderExtWindows, WindowExtWindows};
 use tao::window::{Window, WindowBuilder};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem};
 use tray_icon::TrayIconBuilder;
-use wry::{http::Response, WebContext, WebView, WebViewBuilder, WebViewExtWindows};
+use wry::{http::Response, WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows};
 
 /// 预览窗口隐藏多久后释放 WebView2 进程（释放后再打开会多 0.3~1 秒冷启动）
 const RELEASE_AFTER: Duration = Duration::from_secs(300);
@@ -139,6 +139,8 @@ impl App {
         let p = self.proxy.clone();
         let wv = WebViewBuilder::new_with_web_context(&mut self.ctx)
             .with_asynchronous_custom_protocol("peek".into(), |_id, req, res| serve_async(req, res))
+            // 替换 wry 的默认参数（保留它关掉的那几项），再关掉组件自动更新：不然 WebView2 会往数据目录下载约 57 MB 用不到的组件
+            .with_additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-component-update")
             .with_url("http://peek.localhost/index.html")
             .with_ipc_handler(move |req| {
                 let _ = p.send_event(UserEvent::Ipc(req.body().clone()));
@@ -424,6 +426,14 @@ fn main() {
     if !off_flag.exists() && !native::autostart_enabled() {
         native::set_autostart(true);
     }
+    // WebView2 以前自动下载的组件（DRM、广告过滤规则等，约 57 MB，预览用不到）现在用 --disable-component-update 关掉了，
+    // 留下的在创建 WebView2 之前删掉：WebView2 一启动就会从 component_crx_cache 把它们装回去并占住文件
+    let wv = data.join("WebView2").join("EBWebView");
+    for d in ["component_crx_cache", "WidevineCdm", "Subresource Filter"] {
+        let _ = std::fs::remove_dir_all(wv.join(d));
+    }
+    // 转换出的 PDF 按 30 天 / 300 MB 回收，放后台
+    std::thread::spawn(info::clean_cache);
 
     // Shell 工作线程（STA）：查询选中项、同步选中
     let (wtx, wrx) = mpsc::channel::<WorkerCmd>();

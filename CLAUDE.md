@@ -28,7 +28,8 @@ Windows 上资源管理器选中文件按空格预览。Rust（tao + wry/WebView
 
 - `src/native.rs`：低级键盘钩子（Explorer/桌面文件列表有焦点时拦空格；Peek 自己在前台时拦空格/Esc/↑/↓）、抢前台、自启注册表、系统缩略图（`/thumb`）、OCR、第二实例 WM_COPYDATA 传路径。
 - `src/shell.rs`：IShellWindows 取当前标签页选中项、视图全部项、同步选中。
-- `src/info.rs`：大小/时间格式化、哈希、旧版 Office 经 LibreOffice 转 PDF（缓存在 `%LOCALAPPDATA%\Peek\cache`）。
+- `src/info.rs`：大小/时间格式化、哈希、旧版 Office 经 LibreOffice 转 PDF（缓存在 `%LOCALAPPDATA%\Peek\cache`，`clean_cache` 按 30 天 / 300 MB 最近使用回收，残留 tmp 目录 10 分钟后删）。
+- WebView2 用户数据在 `%LOCALAPPDATA%\Peek\WebView2`：已加 `--disable-component-update` 关掉组件下载（DRM、广告过滤规则，约 57 MB），残留组件在**创建 WebView 之前**同步删除（WebView2 起来后会从 crx cache 装回并占住文件）。`with_additional_browser_args` 会替换 wry 的默认参数，默认的 `--disable-features=...` 要一并写上。
 - `ui/app.js`：按扩展名分派渲染器；docx 用 docx-preview，xlsx/xls 用 SheetJS，pptx 用 pptx-preview，md 用 marked，代码用 highlight.js，PDF 用 Windows.Data.Pdf 按页渲染（`/pdfinfo`、`/pdfpage`，异步协议在后台线程处理）。
 - 本地文件通过 `SetVirtualHostNameToFolderMapping` 映射成 `http://<盘符>.peekfs/...`。
 
