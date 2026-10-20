@@ -133,6 +133,17 @@ pub fn monitor_work_area(h: isize) -> Option<(i32, i32, i32, i32)> {
 const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const RUN_NAME: &str = "Peek";
 
+/// 系统"应用模式"是否为深色：WebView2 底色要和页面一致，否则页面画出来之前会闪一下别的颜色
+pub fn dark_mode() -> bool {
+    unsafe {
+        let mut v = 1u32;
+        let mut sz = 4u32;
+        let k = HSTRING::from(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+        let ok = RegGetValueW(HKEY_CURRENT_USER, &k, &HSTRING::from("AppsUseLightTheme"), RRF_RT_REG_DWORD, None, Some(&mut v as *mut u32 as *mut _), Some(&mut sz)).is_ok();
+        ok && v == 0
+    }
+}
+
 pub fn autostart_enabled() -> bool {
     unsafe {
         let mut sz = 0u32;
@@ -247,6 +258,60 @@ unsafe fn hbitmap_to_bmp(hb: HBITMAP) -> Option<Vec<u8>> {
     f.extend_from_slice(&[0u8; 36 + 12]); // 端点 + gamma
     f.extend_from_slice(&px);
     Some(f)
+}
+
+// ---------- PDF：用系统自带的 Windows.Data.Pdf 按页渲染成图片 ----------
+// WebView2 内置查看器要先读完整个文件才出第一页（80 MB 的教材要 5 秒），这里只解析交叉引用表、只渲染看得到的页。
+// 最近打开的一个文档留着句柄，滚动时连续取页不用重新加载。
+static PDF: std::sync::Mutex<Option<(String, windows::Data::Pdf::PdfDocument)>> = std::sync::Mutex::new(None);
+
+fn pdf_doc(path: &str) -> windows::core::Result<windows::Data::Pdf::PdfDocument> {
+    use windows::Data::Pdf::PdfDocument;
+    use windows::Storage::StorageFile;
+    if let Some((p, d)) = PDF.lock().unwrap().as_ref() {
+        if p == path {
+            return Ok(d.clone());
+        }
+    }
+    unsafe {
+        let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
+    }
+    let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path))?.join()?;
+    let doc = PdfDocument::LoadFromFileAsync(&file)?.join()?;
+    *PDF.lock().unwrap() = Some((path.to_string(), doc.clone()));
+    Ok(doc)
+}
+
+/// 各页尺寸（pt），JSON：[[w,h],...]；加密或损坏的文件返回 Err，页面退回内置查看器
+pub fn pdf_pages(path: &str) -> Result<String, String> {
+    let e = |x: windows::core::Error| x.message().to_string();
+    let doc = pdf_doc(path).map_err(e)?;
+    let n = doc.PageCount().map_err(e)?;
+    let mut out = String::from("[");
+    for i in 0..n {
+        let s = doc.GetPage(i).and_then(|p| p.Size()).map_err(e)?;
+        out += &format!("{}[{:.1},{:.1}]", if i > 0 { "," } else { "" }, s.Width, s.Height);
+    }
+    Ok(out + "]")
+}
+
+/// 第 n 页（从 0 起）按宽 w 像素渲染成 JPEG
+pub fn pdf_render(path: &str, n: u32, w: u32) -> windows::core::Result<Vec<u8>> {
+    use windows::Data::Pdf::PdfPageRenderOptions;
+    use windows::Graphics::Imaging::BitmapEncoder;
+    use windows::Storage::Streams::{DataReader, InMemoryRandomAccessStream};
+    let page = pdf_doc(path)?.GetPage(n)?;
+    let opt = PdfPageRenderOptions::new()?;
+    opt.SetDestinationWidth(w.clamp(64, 4096))?;
+    opt.SetBitmapEncoderId(BitmapEncoder::JpegEncoderId()?)?;
+    let s = InMemoryRandomAccessStream::new()?;
+    page.RenderWithOptionsToStreamAsync(&s, &opt)?.join()?;
+    let len = s.Size()? as u32;
+    let rd = DataReader::CreateDataReader(&s.GetInputStreamAt(0)?)?;
+    rd.LoadAsync(len)?.join()?;
+    let mut buf = vec![0u8; len as usize];
+    rd.ReadBytes(&mut buf)?;
+    Ok(buf)
 }
 
 /// 用 Windows 自带 OCR 识别图片文字（优先简体中文）

@@ -88,10 +88,35 @@ const thumbUrl = (p, s) => `http://peek.localhost/thumb?p=${encodeURIComponent(p
 
 // 系统属性读不到真实尺寸时（info.sized=false，如 SVG），页面拿到尺寸后再让窗口校正一次
 const fit = (w, h, t) => { if (t === token && !cur.sized && w > 0 && h > 0) post('fit', { w, h }); };
-// PDF 内置查看器去掉顶部工具栏（页码、缩放那一条）
-const PDF_VIEW = '#toolbar=0&navpanes=0&view=FitH';
-// FitH 按不含竖滚动条的宽度算，总会多出几像素横向滚动；把 iframe 加高后裁掉底部那条横向滚动条
-const pdfFrame = url => `<div class="center"><iframe class="full pdf" src="${url}${PDF_VIEW}"></iframe></div>`;
+// 加密/损坏、系统渲染不了的 PDF 才退回 WebView2 内置查看器：去掉顶部工具栏，
+// FitH 总会多出几像素横向滚动，把 iframe 加高后裁掉底部那条横向滚动条
+const pdfFrame = url => `<div class="center"><iframe class="full pdf" src="${url}#toolbar=0&navpanes=0&view=FitH"></iframe></div>`;
+
+// PDF 由 Rust 用 Windows.Data.Pdf 按页渲染：先拿各页尺寸排好占位，只加载滚到附近的页，大文件也能立刻出第一页
+async function renderPdf(path, url, t) {
+  const q = `p=${encodeURIComponent(path)}`;
+  const r = await fetch(`http://peek.localhost/pdfinfo?${q}`);
+  if (t !== token) return;
+  if (!r.ok) { view.innerHTML = pdfFrame(url); return; }
+  const pages = await r.json();
+  if (t !== token) return;
+  setMeta('页数', pages.length);
+  view.innerHTML = '<div class="pdf"></div>';
+  const host = view.firstChild;
+  const io = new IntersectionObserver(es => es.forEach(e => {
+    if (!e.isIntersecting) return;
+    const d = e.target; io.unobserve(d);
+    const img = new Image(); img.alt = ''; img.draggable = false;
+    img.onload = () => d.classList.add('ok');
+    img.src = `http://peek.localhost/pdfpage?${q}&n=${d.dataset.n}&w=${Math.round(d.clientWidth * devicePixelRatio)}`;
+    d.appendChild(img);
+  }), { root: view, rootMargin: '150% 0px' });
+  for (let i = 0; i < pages.length; i++) {
+    const d = document.createElement('div');
+    d.className = 'pg'; d.dataset.n = i; d.style.aspectRatio = pages[i][0] + ' / ' + pages[i][1];
+    host.appendChild(d); io.observe(d);
+  }
+}
 
 // ---------- 渲染器 ----------
 // 信息卡片（文件夹、不支持的格式、出错）：左边系统图标，右边名称、说明、大小和修改时间，同原版
@@ -352,7 +377,7 @@ const peek = window.peek = {
     cur = info; meta = {};
     $('#name').textContent = info.name;
     $('#b-ocr').hidden = true; $('#ocrbox').hidden = true; $('#hash').textContent = '';
-    $('#findbar').hidden = true;
+    showFind(false);
     view.scrollTop = 0; view.scrollLeft = 0;
     renderProps();
     if (!info.exists) return card(info, '文件不存在');
@@ -363,7 +388,7 @@ const peek = window.peek = {
         case 'thumbimg': return renderImage(info, thumbUrl(info.path, 2560), true);
         case 'video': return renderMedia(info, 'video');
         case 'audio': return renderMedia(info, 'audio');
-        case 'pdf': view.innerHTML = pdfFrame(info.url); return;
+        case 'pdf': return await renderPdf(info.path, info.url, t);
         case 'html': view.innerHTML = `<iframe class="full" sandbox="" src="${info.url}"></iframe>`; return;
         case 'md': return await renderMarkdown(info, t);
         case 'csv': return await renderCsv(info, t);
@@ -385,7 +410,7 @@ const peek = window.peek = {
   converted(r) {
     if (!cur || r.path !== cur.path) return;
     if (r.error) return card(cur, r.error);
-    view.innerHTML = pdfFrame(r.url);
+    renderPdf(r.pdf, r.url, token);
   },
   clear() { token++; view.innerHTML = ''; cur = null; },
   position(i, n) { if (cur) { cur.index = i; cur.total = n; } },
@@ -401,10 +426,11 @@ const peek = window.peek = {
 
 // ---------- 交互 ----------
 function copyPath() { if (cur) navigator.clipboard.writeText(cur.path).then(() => toast('已复制路径')); }
-function toggleFind() {
-  const fb = $('#findbar'); fb.hidden = !fb.hidden;
-  if (!fb.hidden) { $('#find-in').focus(); $('#find-in').select(); }
+function showFind(on) {
+  $('#findbar').hidden = !on; $('#b-find').classList.toggle('on', on);
+  if (on) { $('#find-in').focus(); $('#find-in').select(); } else $('#find-st').textContent = '';
 }
+const toggleFind = () => showFind($('#findbar').hidden);
 function doFind(back) {
   const q = $('#find-in').value; if (!q) return;
   const ok = window.find(q, false, back, true, false, false, false);
@@ -413,10 +439,13 @@ function doFind(back) {
 }
 $('#find-in').addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); doFind(e.shiftKey); }
-  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); $('#findbar').hidden = true; }
+  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); showFind(false); }
   e.stopPropagation();
 });
 $('#b-find').onclick = toggleFind;
+$('#f-prev').onclick = () => doFind(true);
+$('#f-next').onclick = () => doFind(false);
+$('#f-close').onclick = () => showFind(false);
 $('#b-copy').onclick = copyPath;
 $('#b-open').onclick = () => post('open');
 $('#b-pin').onclick = () => post('pin');

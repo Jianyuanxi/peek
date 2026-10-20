@@ -1,12 +1,14 @@
 :root {
   --bg: #f6f6f7; --panel: #ffffff; --fg: #1d1d1f; --muted: #6e6e73; --line: #e2e2e6;
   --btn: #ececf0; --btn-h: #dedee4; --accent: #2563eb; --code: #ffffff;
+  --icon: #4b4b52; --hover: rgba(0,0,0,.06); --press: rgba(0,0,0,.1); --accent-bg: rgba(37,99,235,.12); --paper: #e9e9ec;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #1e1e20; --panel: #26262a; --fg: #ececf0; --muted: #9a9aa2; --line: #36363c;
     --btn: #313136; --btn-h: #3c3c43; --accent: #60a5fa; --code: #1b1b1e;
+    --icon: #c8c8ce; --hover: rgba(255,255,255,.08); --press: rgba(255,255,255,.13); --accent-bg: rgba(96,165,250,.18); --paper: #2b2b30;
     color-scheme: dark;
   }
 }
@@ -17,40 +19,57 @@ body {
   font: 13px/1.5 "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif;
   display: flex; flex-direction: column; overflow: hidden;
 }
-/* 唯一的界面框架：顶部深色功能栏（窗口无系统标题栏），左边文件名，右边功能；按住空白处拖动窗口 */
-#bar { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 6px 0 12px; flex: none;
-  background: #1c1c1f; color: #ececf0; user-select: none; }
-#bar button.ic { color: #d8d8de; }
-#bar button.ic:hover { background: #34343a; color: #fff; }
-#bar button.ic.on { background: var(--accent); color: #fff; }
-#b-close:hover { background: #c42b1c !important; }
-button.ic { width: 30px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: transparent; }
-button.ic:hover { background: var(--btn-h); }
-button.ic.on { background: var(--accent); color: #fff; }
-button.ic[hidden] { display: none; }
-button.ic:disabled { opacity: .45; cursor: default; }
-button.ic svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+/* 唯一的界面框架：顶部白色功能栏（窗口无系统标题栏），左边文件名，右边图标按钮；按住空白处拖动窗口。
+   查找框、详细信息都是浮在内容右上角的卡片，不挤占预览区（挤占会让文档、图片重新排版） */
+#bar { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 5px 0 14px; flex: none;
+  background: var(--panel); border-bottom: 1px solid var(--line); user-select: none; }
 #title { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline; }
 #name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#tools { display: flex; gap: 4px; flex: none; }
-button { font: inherit; font-size: 12px; color: var(--fg); background: var(--btn); border: 0; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+#tools { display: flex; gap: 2px; flex: none; }
+button.ic { width: 32px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--icon); border-radius: 6px; transition: background-color .12s, color .12s; }
+button.ic:hover { background: var(--hover); color: var(--fg); }
+button.ic:active { background: var(--press); }
+button.ic svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+  transition: transform .15s cubic-bezier(.3,.7,.4,1.4); }
+button.ic:active svg { transform: scale(.82); transition-duration: .06s; }
+/* 开关类按钮（置顶、详细信息、查找）打开时：浅色强调底 + 强调色图标，置顶图钉再斜过来 */
+button.ic.on { background: var(--accent-bg); color: var(--accent); }
+#b-pin.on svg { transform: rotate(-35deg); }
+#b-close:hover { background: #e81123; color: #fff; }
+#b-close:active { background: #c50f1f; }
+button.ic[hidden] { display: none; }
+button.ic:disabled { opacity: .4; cursor: default; }
+button.ic:disabled svg { animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+button { font: inherit; font-size: 12px; color: var(--fg); background: var(--btn); border: 0; border-radius: 6px; padding: 4px 10px; cursor: pointer; transition: background-color .12s, transform .06s; }
 button:hover { background: var(--btn-h); }
+button:not(.ic):active { transform: scale(.96); }
 button.on { background: var(--accent); color: #fff; }
-#findbar { position: absolute; top: 46px; right: 14px; z-index: 5; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px; display: flex; gap: 6px; align-items: center; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
-#findbar[hidden] { display: none; }
-#find-in { width: 280px; font: inherit; padding: 4px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--fg); outline: none; }
-#find-st { color: var(--muted); font-size: 12px; }
-#main { flex: 1; display: flex; min-height: 0; }
+.pop { position: absolute; z-index: 5; right: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.14), 0 1px 3px rgba(0,0,0,.08); animation: pop-in .16s cubic-bezier(.2,.8,.3,1); }
+.pop[hidden] { display: none !important; }
+@keyframes pop-in { from { opacity: 0; transform: translateY(-6px) scale(.98); } }
+#findbar { top: 46px; max-width: calc(100vw - 16px); padding: 5px; display: flex; gap: 2px; align-items: center; }
+#find-in { width: 240px; min-width: 60px; flex: 0 1 auto; font: inherit; padding: 5px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); outline: none; margin-right: 4px; transition: border-color .12s; }
+#find-in:focus { border-color: var(--accent); }
+#find-st { color: var(--muted); font-size: 12px; min-width: 0; white-space: nowrap; }
+#find-st:empty { display: none; }
+#findbar button.ic { width: 28px; height: 26px; }
+#findbar button.ic svg { width: 15px; height: 15px; }
+#main { flex: 1; display: flex; min-height: 0; position: relative; }
 #view { flex: 1; min-width: 0; overflow: auto; position: relative; }
-#side { width: 300px; flex: none; border-left: 1px solid var(--line); overflow: auto; padding: 10px 12px; background: var(--panel); }
-#side[hidden] { display: none; }
+#findbar:not([hidden]) ~ #main #side { top: 54px; max-height: calc(100% - 62px); }
+#side { top: 8px; width: 300px; max-height: calc(100% - 16px); overflow: auto; padding: 12px 14px; }
 #props { width: 100%; border-collapse: collapse; font-size: 12px; }
 #props td { padding: 3px 0; vertical-align: top; word-break: break-all; }
 #props td:first-child { color: var(--muted); white-space: nowrap; padding-right: 10px; width: 1%; }
 #hashbox { margin-top: 12px; }
 #hash, #ocr { white-space: pre-wrap; word-break: break-all; font: 12px/1.6 Consolas, "Microsoft YaHei UI", "Microsoft YaHei", monospace; user-select: text; margin: 6px 0 0; }
 .ocr-h { margin-top: 14px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
-#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: rgba(0,0,0,.78); color: #fff; padding: 6px 14px; border-radius: 6px; font-size: 12px; }
+#toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: rgba(32,32,36,.9); color: #fff; padding: 7px 16px; border-radius: 999px; font-size: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.2); animation: toast-in .18s cubic-bezier(.2,.8,.3,1); pointer-events: none; }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
 #toast[hidden] { display: none; }
 
 /* 各类预览 */
@@ -91,8 +110,12 @@ table.grid tr:first-child td, table.grid th { background: var(--panel); font-wei
 .tabs button.on { background: var(--accent); color: #fff; }
 .sheetwrap { position: absolute; inset: 0; display: flex; flex-direction: column; }
 .sheet { flex: 1; overflow: auto; background: var(--code); }
-.docx-host { background: #e9e9ec; min-height: 100%; user-select: text; }
-@media (prefers-color-scheme: dark) { .docx-host { background: #2b2b30; } }
+.docx-host { background: var(--paper); min-height: 100%; user-select: text; }
+/* PDF 页面：灰底上白纸加阴影，同 docx；图片加载前先显示白纸占位 */
+.pdf { background: var(--paper); min-height: 100%; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.pdf .pg { width: 100%; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.18); flex: none; }
+.pdf .pg img { display: block; width: 100%; height: 100%; opacity: 0; transition: opacity .15s; user-select: none; }
+.pdf .pg.ok img { opacity: 1; }
 .docx-host .docx-wrapper { background: transparent !important; padding: 20px !important; }
 .docx-host section.docx { box-shadow: 0 2px 10px rgba(0,0,0,.25) !important; margin-bottom: 20px !important; }
 .pptx-host { padding: 16px; display: flex; flex-direction: column; align-items: center; user-select: text; }

@@ -63,18 +63,34 @@ static ASSETS: &[(&str, &[u8], &str)] = &[
     asset!("vendor/github-markdown.css", "text/css"),
 ];
 
-fn serve(req: wry::http::Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
-    let uri = req.uri();
-    let path = uri.path().trim_start_matches('/');
-    if path == "thumb" {
-        let q = uri.query().unwrap_or("");
-        let p = q.split('&').find_map(|kv| kv.strip_prefix("p=")).map(url_decode).unwrap_or_default();
-        let s = q.split('&').find_map(|kv| kv.strip_prefix("s=")).and_then(|v| v.parse().ok()).unwrap_or(1024);
-        return match native::thumbnail_bmp(&p, s) {
-            Some(b) => Response::builder().header("Content-Type", "image/bmp").header("Cache-Control", "no-store").body(Cow::Owned(b)).unwrap(),
-            None => Response::builder().status(404).body(Cow::Borrowed(&[][..])).unwrap(),
-        };
+fn bytes(ty: &str, b: Option<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
+    match b {
+        Some(b) => Response::builder().header("Content-Type", ty).header("Cache-Control", "no-store").body(Cow::Owned(b)).unwrap(),
+        None => Response::builder().status(404).body(Cow::Borrowed(&[][..])).unwrap(),
     }
+}
+
+/// 缩略图和 PDF 渲染要几十到几百毫秒，放到后台线程，别卡住 UI 线程
+fn serve_async(req: wry::http::Request<Vec<u8>>, res: wry::RequestAsyncResponder) {
+    let path = req.uri().path().trim_start_matches('/').to_string();
+    if !matches!(path.as_str(), "thumb" | "pdfinfo" | "pdfpage") {
+        return res.respond(serve(&path));
+    }
+    let q = req.uri().query().unwrap_or("").to_string();
+    let arg = |k: &str| q.split('&').find_map(|kv| kv.strip_prefix(k).and_then(|v| v.strip_prefix('='))).map(url_decode);
+    let p = arg("p").unwrap_or_default();
+    let num = |k: &str, d: u32| arg(k).and_then(|v| v.parse().ok()).unwrap_or(d);
+    let (s, n, w) = (num("s", 1024), num("n", 0), num("w", 1200));
+    std::thread::spawn(move || {
+        res.respond(match path.as_str() {
+            "thumb" => bytes("image/bmp", native::thumbnail_bmp(&p, s as i32)),
+            "pdfinfo" => bytes("application/json", native::pdf_pages(&p).ok().map(String::into_bytes)),
+            _ => bytes("image/jpeg", native::pdf_render(&p, n, w).ok()),
+        })
+    });
+}
+
+fn serve(path: &str) -> Response<Cow<'static, [u8]>> {
     let path = if path.is_empty() { "index.html" } else { path };
     match ASSETS.iter().find(|a| a.0 == path) {
         Some(a) => Response::builder().header("Content-Type", a.2).body(Cow::Borrowed(a.1)).unwrap(),
@@ -122,13 +138,13 @@ impl App {
         }
         let p = self.proxy.clone();
         let wv = WebViewBuilder::new_with_web_context(&mut self.ctx)
-            .with_custom_protocol("peek".into(), |_id, req| serve(req))
+            .with_asynchronous_custom_protocol("peek".into(), |_id, req, res| serve_async(req, res))
             .with_url("http://peek.localhost/index.html")
             .with_ipc_handler(move |req| {
                 let _ = p.send_event(UserEvent::Ipc(req.body().clone()));
             })
             .with_devtools(cfg!(debug_assertions))
-            .with_background_color((32, 32, 32, 255))
+            .with_background_color(if native::dark_mode() { (30, 30, 32, 255) } else { (246, 246, 247, 255) })
             .build(&self.window)
             .expect("WebView2 创建失败");
         map_drives(&wv);
@@ -178,7 +194,7 @@ impl App {
         self.hidden_at = None;
     }
 
-    /// 内容区 cw×ch（逻辑像素）加顶栏，按比例缩到不超过工作区的 ratio，不放大；最小 400×200（同原版）。
+    /// 内容区 cw×ch（逻辑像素）加顶栏，按比例缩到不超过工作区的 ratio，不放大；最小 300×200：原版最小宽 400，窄长图（竖拍照片、小图）两边会留白。
     /// 第一次显示在工作区居中；已显示时（切换文件、页面校正尺寸）保持窗口中心不动，只改大小
     fn resize(&self, cw: f64, ch: f64, ratio: f64) {
         if cw < 1.0 || ch < 1.0 || self.window.is_maximized() {
@@ -190,7 +206,7 @@ impl App {
         let s = self.window.scale_factor();
         let (maxw, maxh) = (w as f64 * ratio / s, h as f64 * ratio / s - BAR);
         let k = (maxw / cw).min(maxh / ch).min(1.0);
-        let size = LogicalSize::new((cw * k).max(400.0).round(), (ch * k + BAR).max(200.0).round());
+        let size = LogicalSize::new((cw * k).max(300.0).round(), (ch * k + BAR).max(200.0).round());
         let (old_pos, old) = (self.window.outer_position().unwrap_or_default(), self.window.outer_size());
         if self.window.inner_size().to_logical::<f64>(s) != size {
             self.window.set_inner_size(size);
@@ -285,7 +301,7 @@ impl App {
                 let p = self.proxy.clone();
                 std::thread::spawn(move || {
                     let r = match info::convert_pdf(&cur) {
-                        Ok(pdf) => json!({"path": cur, "url": info::file_url(&pdf)}),
+                        Ok(pdf) => json!({"path": cur, "pdf": pdf, "url": info::file_url(&pdf)}),
                         Err(e) => json!({"path": cur, "error": e}),
                     };
                     let _ = p.send_event(UserEvent::Js(format!("peek.converted({})", r)));
@@ -482,7 +498,7 @@ fn main() {
         .with_inner_size(LogicalSize::new(880.0, 600.0))
         .with_decorations(false)
         .with_undecorated_shadow(true)
-        .with_min_inner_size(LogicalSize::new(400.0, 200.0))
+        .with_min_inner_size(LogicalSize::new(300.0, 200.0))
         .build(&event_loop)
         .unwrap();
     native::OWN_HWND.store(window.hwnd() as isize, std::sync::atomic::Ordering::Relaxed);

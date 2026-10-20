@@ -22,10 +22,13 @@
     <button class="ic" id="b-close" title="关闭 (空格 / Esc)" aria-label="关闭"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
   </div>
 </header>
-<div id="findbar" hidden><input id="find-in" placeholder="查找文字，Enter 下一个，Shift+Enter 上一个"><span id="find-st"></span></div>
+<div id="findbar" class="pop" hidden><input id="find-in" placeholder="查找文字"><span id="find-st"></span>
+  <button class="ic" id="f-prev" title="上一个 (Shift+Enter)" aria-label="上一个"><svg viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></svg></button>
+  <button class="ic" id="f-next" title="下一个 (Enter)" aria-label="下一个"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+  <button class="ic" id="f-close" title="关闭查找 (Esc)" aria-label="关闭查找"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
 <main id="main">
   <section id="view"></section>
-  <aside id="side" hidden>
+  <aside id="side" class="pop" hidden>
     <table id="props"></table>
     <div id="hashbox"><button id="b-hash">计算 MD5 / SHA256</button><pre id="hash"></pre></div>
     <div id="ocrbox" hidden><div class="ocr-h">识别结果 <button id="b-ocrcopy">复制</button></div><pre id="ocr"></pre></div>
