@@ -54,6 +54,91 @@ pub fn file_url(path: &str) -> String {
     format!("http://{}.peekfs/{}", drive, enc)
 }
 
+/// 扩展名 → 预览类型（ui/app.js 按这个 kind 分派渲染器）
+const KINDS: &[(&str, &str)] = &[
+    ("image", "jpg jpeg jfif pjpeg png apng gif webp bmp ico cur svg avif"),
+    ("thumbimg", "heic heif tif tiff psd raw cr2 cr3 nef arw dng orf rw2 raf jxr wdp dds tga exr hdr"),
+    ("video", "mp4 m4v webm mov mkv ogv 3gp ts m2ts"),
+    ("audio", "mp3 wav flac ogg oga opus m4a aac weba"),
+    ("pdf", "pdf"),
+    ("md", "md markdown mdown mkd"),
+    ("html", "html htm xhtml mht"),
+    ("csv", "csv tsv"),
+    ("docx", "docx docm dotx dotm"),
+    ("sheet", "xlsx xlsm xlsb xls xltx ods et ett numbers"),
+    ("pptx", "pptx pptm ppsx potx"),
+    ("legacy", "doc dot wps wpt rtf odt ott ppt pps pot dps dpt odp odg vsd"),
+    ("zip", "zip jar apk xpi vsix nupkg epub cbz whl aar ipa"),
+    ("font", "ttf otf woff woff2"),
+];
+
+fn kind_of(path: &str, name: &str, ext: &str, is_dir: bool) -> &'static str {
+    if is_dir {
+        return "folder";
+    }
+    if let Some((k, _)) = KINDS.iter().find(|(_, list)| list.split(' ').any(|e| e == ext)) {
+        return k;
+    }
+    let n = name.to_ascii_lowercase();
+    if ["readme", "license", "makefile", "dockerfile", "changelog"].iter().any(|x| n == *x) {
+        return "text";
+    }
+    // 其余按内容判断：前 8 KB 没有 0 字节（或有 UTF-16 BOM）就当文本
+    if looks_text(path) {
+        "text"
+    } else {
+        "other"
+    }
+}
+
+fn looks_text(path: &str) -> bool {
+    use std::io::Read;
+    let mut buf = [0u8; 8192];
+    let Ok(n) = std::fs::File::open(path).and_then(|mut f| f.read(&mut buf)) else { return false };
+    let b = &buf[..n];
+    b.starts_with(&[0xFF, 0xFE]) || b.starts_with(&[0xFE, 0xFF]) || !b.contains(&0)
+}
+
+/// PDF 第一页尺寸（pt）：在文件前 1 MB 里找第一个 /MediaBox [x0 y0 x1 y1]
+fn pdf_page_size(path: &str) -> Option<(f64, f64)> {
+    use std::io::Read;
+    let mut buf = Vec::new();
+    std::fs::File::open(path).ok()?.take(1 << 20).read_to_end(&mut buf).ok()?;
+    let i = buf.windows(9).position(|w| w == b"/MediaBox")?;
+    let tail = String::from_utf8_lossy(&buf[i + 9..(i + 120).min(buf.len())]).to_string();
+    let inner = tail.split_once('[')?.1.split_once(']')?.0.to_string();
+    let v: Vec<f64> = inner.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+    let (w, h) = ((v.get(2)? - v.first()?).abs(), (v.get(3)? - v.get(1)?).abs());
+    (w > 1.0 && h > 1.0).then_some((w, h))
+}
+
+/// 窗口内容区想要的大小（逻辑像素）和最多占工作区的比例，照原版 QuickLook 各插件的 PreferredSize。
+/// 在显示内容之前先把窗口调好，不会先大后小闪一下。sized=false 表示没读到真实尺寸，页面加载后再校正
+pub fn preferred_size(path: &str, kind: &str) -> (f64, f64, f64, bool) {
+    match kind {
+        "image" | "thumbimg" => match crate::native::media_size(path) {
+            Some((w, h)) => (w, h, 0.8, true),
+            None => (800.0, 600.0, 0.8, false),
+        },
+        "video" => match crate::native::media_size(path) {
+            Some((w, h)) => (w.max(100.0), h.max(100.0), 0.8, true),
+            None => (1366.0, 768.0, 0.8, false),
+        },
+        "audio" => (500.0, 300.0, 0.8, true),
+        // PDF 按第一页比例，尽量大（占工作区 90%）
+        "pdf" => {
+            let (w, h) = pdf_page_size(path).unwrap_or((595.0, 842.0));
+            (w * 3.0, h * 3.0, 0.9, true)
+        }
+        "docx" | "sheet" | "pptx" | "legacy" => (1200.0, 800.0, 0.8, true),
+        "md" | "html" => (1000.0, 600.0, 0.9, true),
+        "csv" => (1000.0, 700.0, 0.9, true),
+        "zip" => (800.0, 400.0, 0.9, true),
+        "text" | "font" => (800.0, 600.0, 0.9, true),
+        _ => (453.0, 172.0, 0.9, true),
+    }
+}
+
 pub fn basic(path: &str, index: usize, total: usize) -> Value {
     let p = Path::new(path);
     let name = p.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string());
@@ -62,10 +147,14 @@ pub fn basic(path: &str, index: usize, total: usize) -> Value {
     let is_dir = md.as_ref().map(|m| m.is_dir()).unwrap_or(false);
     let size = md.as_ref().filter(|m| !m.is_dir()).map(|m| m.len());
     let attrs = md.as_ref().map(|m| m.file_attributes()).unwrap_or(0);
+    let kind = if md.is_some() { kind_of(path, &name, &ext, is_dir) } else { "other" };
+    let (pw, ph, pr, sized) = preferred_size(path, kind);
     json!({
         "path": path,
         "name": name,
         "ext": ext,
+        "kind": kind,
+        "pw": pw, "ph": ph, "pr": pr, "sized": sized,
         "isDir": is_dir,
         "exists": md.is_some(),
         "size": size,

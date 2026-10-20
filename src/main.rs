@@ -18,6 +18,8 @@ use wry::{http::Response, WebContext, WebView, WebViewBuilder, WebViewExtWindows
 
 /// 预览窗口隐藏多久后释放 WebView2 进程（释放后再打开会多 0.3~1 秒冷启动）
 const RELEASE_AFTER: Duration = Duration::from_secs(300);
+/// 顶栏高度（逻辑像素，和 app.css #bar 一致）
+const BAR: f64 = 38.0;
 
 /// 环境变量 PEEK_RELEASE_SECS 可改释放时间（调试用）
 fn release_after() -> Duration {
@@ -58,6 +60,7 @@ static ASSETS: &[(&str, &[u8], &str)] = &[
     asset!("vendor/highlight.min.js", "text/javascript"),
     asset!("vendor/hl-light.css", "text/css"),
     asset!("vendor/hl-dark.css", "text/css"),
+    asset!("vendor/github-markdown.css", "text/css"),
 ];
 
 fn serve(req: wry::http::Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
@@ -142,10 +145,13 @@ impl App {
         }
     }
 
+    /// 先按文件类型把窗口调到目标大小，再交给页面渲染
     fn show_current(&mut self) {
         let Some(path) = self.items.get(self.index).cloned() else { return };
         let v = info::basic(&path, self.index, self.items.len());
         self.window.set_title(v["name"].as_str().unwrap_or("Peek"));
+        let f = |k: &str| v[k].as_f64().unwrap_or(0.0);
+        self.resize(f("pw"), f("ph"), f("pr"));
         self.eval(format!("peek.show({})", v));
     }
 
@@ -160,9 +166,6 @@ impl App {
         self.items = items;
         self.index = 0;
         self.ensure_webview();
-        if !visible {
-            self.place(fg);
-        }
         self.show_current();
         self.window.set_visible(true);
         if let Some(w) = &self.webview {
@@ -175,32 +178,29 @@ impl App {
         self.hidden_at = None;
     }
 
-    fn place(&self, fg: isize) {
-        if let Some((x, y, w, h)) = native::monitor_work_area(fg) {
-            let size = self.window.outer_size();
-            let (ww, wh) = (size.width as i32, size.height as i32);
-            self.window.set_outer_position(PhysicalPosition::new(x + (w - ww) / 2, y + (h - wh) / 2));
-        }
-    }
-
-    /// 按内容比例设窗口大小并居中：内容区 cw×ch（CSS 像素），ew/eh 是界面框架占的宽高。
-    /// 最大占工作区 70%，内容比这小就按原尺寸，不放大；最小 420×300
-    fn fit(&self, cw: f64, ch: f64, ew: f64, eh: f64) {
+    /// 内容区 cw×ch（逻辑像素）加顶栏，按比例缩到不超过工作区的 ratio，不放大；最小 400×200（同原版）。
+    /// 第一次显示在工作区居中；已显示时（切换文件、页面校正尺寸）保持窗口中心不动，只改大小
+    fn resize(&self, cw: f64, ch: f64, ratio: f64) {
         if cw < 1.0 || ch < 1.0 || self.window.is_maximized() {
             return;
         }
-        let anchor = if self.prev_fg != 0 { self.prev_fg } else { hwnd_of(&self.window).0 as isize };
+        let visible = self.window.is_visible();
+        let anchor = if visible || self.prev_fg == 0 { hwnd_of(&self.window).0 as isize } else { self.prev_fg };
         let Some((x, y, w, h)) = native::monitor_work_area(anchor) else { return };
         let s = self.window.scale_factor();
-        let (maxw, maxh) = ((w as f64 * 0.7 / s - ew).max(1.0), (h as f64 * 0.7 / s - eh).max(1.0));
+        let (maxw, maxh) = (w as f64 * ratio / s, h as f64 * ratio / s - BAR);
         let k = (maxw / cw).min(maxh / ch).min(1.0);
-        let size = LogicalSize::new((cw * k + ew).max(420.0).round(), (ch * k + eh).max(300.0).round());
-        if self.window.inner_size().to_logical::<f64>(s) == size {
-            return;
+        let size = LogicalSize::new((cw * k).max(400.0).round(), (ch * k + BAR).max(200.0).round());
+        let (old_pos, old) = (self.window.outer_position().unwrap_or_default(), self.window.outer_size());
+        if self.window.inner_size().to_logical::<f64>(s) != size {
+            self.window.set_inner_size(size);
         }
-        self.window.set_inner_size(size);
         let o = self.window.outer_size();
-        self.window.set_outer_position(PhysicalPosition::new(x + (w - o.width as i32) / 2, y + (h - o.height as i32) / 2));
+        let (ow, oh) = (o.width as i32, o.height as i32);
+        let (cx, cy) = if visible { (old_pos.x + old.width as i32 / 2, old_pos.y + old.height as i32 / 2) } else { (x + w / 2, y + h / 2) };
+        let nx = (cx - ow / 2).clamp(x, (x + w - ow).max(x));
+        let ny = (cy - oh / 2).clamp(y, (y + h - oh).max(y));
+        self.window.set_outer_position(PhysicalPosition::new(nx, ny));
     }
 
     fn hide(&mut self) {
@@ -247,9 +247,10 @@ impl App {
             "drag" => {
                 let _ = self.window.drag_window();
             }
+            // 页面拿到真实尺寸后校正（系统属性读不到尺寸的图片/视频，如 SVG）
             "fit" => {
                 let f = |k: &str| v[k].as_f64().unwrap_or(0.0);
-                self.fit(f("w"), f("h"), f("ew"), f("eh"));
+                self.resize(f("w"), f("h"), 0.8);
             }
             "prev" => self.step(-1),
             "next" => self.step(1),
@@ -481,10 +482,15 @@ fn main() {
         .with_inner_size(LogicalSize::new(880.0, 600.0))
         .with_decorations(false)
         .with_undecorated_shadow(true)
-        .with_min_inner_size(LogicalSize::new(420.0, 300.0))
+        .with_min_inner_size(LogicalSize::new(400.0, 200.0))
         .build(&event_loop)
         .unwrap();
     native::OWN_HWND.store(window.hwnd() as isize, std::sync::atomic::Ordering::Relaxed);
+    // 无边框窗口在第一次显示前还没重算非客户区，tao 会把标题栏高度算进 set_inner_size，第一次打开高出 29px；先强制重算一次
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::*;
+        let _ = SetWindowPos(hwnd_of(&window), None, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
 
     let menu = Menu::new();
     let auto_item = CheckMenuItem::new("开机自启", true, native::autostart_enabled(), None);

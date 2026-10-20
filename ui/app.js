@@ -19,32 +19,7 @@ const fmtDur = s => {
   return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0');
 };
 
-const EXT = {
-  image: 'jpg jpeg jfif pjpeg png apng gif webp bmp ico cur svg avif',
-  thumbimg: 'heic heif tif tiff psd raw cr2 cr3 nef arw dng orf rw2 raf jxr wdp dds tga exr hdr',
-  video: 'mp4 m4v webm mov mkv ogv 3gp ts m2ts',
-  audio: 'mp3 wav flac ogg oga opus m4a aac weba',
-  pdf: 'pdf',
-  md: 'md markdown mdown mkd',
-  html: 'html htm xhtml mht',
-  csv: 'csv tsv',
-  docx: 'docx docm dotx dotm',
-  sheet: 'xlsx xlsm xlsb xls xltx ods et ett numbers',
-  pptx: 'pptx pptm ppsx potx',
-  legacy: 'doc dot wps wpt rtf odt ott ppt pps pot dps dpt odp odg vsd',
-  zip: 'zip jar apk xpi vsix nupkg epub cbz whl aar ipa',
-  font: 'ttf otf woff woff2',
-  text: 'txt log ini cfg conf config toml yaml yml json jsonc json5 xml xaml csproj vcxproj props targets sln plist svgz ' +
-    'c h cc cpp cxx hpp hh hxx cs java kt kts scala go rs py pyw pyi rb php pl pm lua r dart swift m mm ' +
-    'js mjs cjs jsx ts tsx vue svelte css scss sass less styl astro ' +
-    'sh bash zsh fish ps1 psm1 psd1 bat cmd vbs ahk reg ' +
-    'sql graphql gql proto thrift prisma ' +
-    'gradle properties env gitignore gitattributes editorconfig dockerfile makefile cmake mk ninja ' +
-    'tex bib rst adoc org srt ass vtt lrc nfo diff patch ipynb ets json5 hap ' +
-    'asm s v sv vhd vhdl zig nim ex exs erl hrl clj cljs hs elm fs fsx ml mli jl groovy tf hcl nix',
-};
-const KIND = {};
-for (const [k, v] of Object.entries(EXT)) for (const e of v.split(/\s+/)) if (e && !KIND[e]) KIND[e] = k;
+// 预览类型（info.kind）和窗口初始大小由 Rust 端 info::basic 按扩展名/文件头决定
 const HL_LANG = { rs: 'rust', py: 'python', js: 'javascript', mjs: 'javascript', cjs: 'javascript', ts: 'typescript', tsx: 'typescript', jsx: 'javascript',
   cs: 'csharp', kt: 'kotlin', h: 'cpp', hpp: 'cpp', cc: 'cpp', cxx: 'cpp', c: 'c', sh: 'bash', zsh: 'bash', ps1: 'powershell', psm1: 'powershell',
   bat: 'dos', cmd: 'dos', yml: 'yaml', toml: 'ini', cfg: 'ini', conf: 'ini', vue: 'xml', html: 'xml', xaml: 'xml', csproj: 'xml', svg: 'xml',
@@ -59,6 +34,14 @@ function lib(src) {
     const s = document.createElement('script');
     s.src = 'vendor/' + src; s.onload = ok; s.onerror = bad;
     document.head.appendChild(s);
+  }));
+}
+
+function css(href) {
+  return loaded[href] || (loaded[href] = new Promise(ok => {
+    const l = document.createElement('link');
+    l.rel = 'stylesheet'; l.href = 'vendor/' + href; l.onload = l.onerror = ok;
+    document.head.appendChild(l);
   }));
 }
 
@@ -100,37 +83,22 @@ function decode(buf) {
     catch (e2) { return [new TextDecoder('gbk').decode(buf), 'GBK']; }
   }
 }
-function looksText(buf) {
-  const n = Math.min(buf.length, 8192);
-  for (let i = 0; i < n; i++) if (buf[i] === 0) return buf[0] === 0xFF && buf[1] === 0xFE || buf[0] === 0xFE && buf[1] === 0xFF;
-  return true;
-}
 const buffer = url => fetch(url).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); });
 const thumbUrl = (p, s) => `http://peek.localhost/thumb?p=${encodeURIComponent(p)}&s=${s || 1280}&t=${Date.now()}`;
 
-// 让窗口按内容比例调整：w/h 是内容区想要的 CSS 像素，ew/eh 是标题栏、状态栏、侧栏占掉的部分。
-// 等窗口真的变了（或 150 ms 超时）再返回，后续按新尺寸排版
-function fit(w, h, t) {
-  if (t != null && t !== token) return Promise.resolve();
-  const ew = window.innerWidth - view.clientWidth, eh = window.innerHeight - view.clientHeight;
-  return new Promise(ok => {
-    const done = () => { clearTimeout(tm); window.removeEventListener('resize', f); ok(); };
-    const f = () => requestAnimationFrame(done);
-    const tm = setTimeout(done, 150);
-    window.addEventListener('resize', f);
-    post('fit', { w, h, ew, eh });
-  });
-}
-// 文档类本来就上下滚动，不按 A4 整页比例（那样宽度只剩 580，字太小），取接近 1:1 的竖窗口
-const DEFAULT_SIZE = [880, 560], PAGE_SIZE = [800, 900];
+// 系统属性读不到真实尺寸时（info.sized=false，如 SVG），页面拿到尺寸后再让窗口校正一次
+const fit = (w, h, t) => { if (t === token && !cur.sized && w > 0 && h > 0) post('fit', { w, h }); };
 // PDF 内置查看器去掉顶部工具栏（页码、缩放那一条）
 const PDF_VIEW = '#toolbar=0&navpanes=0&view=FitH';
 // FitH 按不含竖滚动条的宽度算，总会多出几像素横向滚动；把 iframe 加高后裁掉底部那条横向滚动条
 const pdfFrame = url => `<div class="center"><iframe class="full pdf" src="${url}${PDF_VIEW}"></iframe></div>`;
 
 // ---------- 渲染器 ----------
+// 信息卡片（文件夹、不支持的格式、出错）：左边系统图标，右边名称、说明、大小和修改时间，同原版
 function card(info, sub) {
-  view.innerHTML = `<div class="card"><img alt="" src="${thumbUrl(info.path, 512)}"><div class="big">${esc(info.name)}</div><div class="sub">${esc(sub || '')}</div></div>`;
+  const extra = [info.sizeText, info.modified].filter(Boolean).join('　');
+  view.innerHTML = `<div class="card"><img alt="" src="${thumbUrl(info.path, 256)}"><div class="txt"><div class="big">${esc(info.name)}</div>` +
+    `<div class="sub">${esc(sub || '')}</div>${extra ? `<div class="sub">${esc(extra)}</div>` : ''}</div></div>`;
   view.querySelector('img').onerror = function () { this.remove(); };
 }
 
@@ -224,13 +192,13 @@ function sanitize(html) {
 
 async function renderMarkdown(info, t) {
   const { buf } = await readHead(info.url, 4 << 20);
-  await Promise.all([lib('marked.umd.js'), lib('highlight.min.js')]);
+  await Promise.all([lib('marked.umd.js'), lib('highlight.min.js'), css('github-markdown.css')]);
   if (t !== token) return;
   const [text, enc] = decode(buf);
   setMeta('编码', enc);
   const base = info.url.slice(0, info.url.lastIndexOf('/') + 1);
   let html = marked.parse(text);
-  view.innerHTML = `<div class="mdwrap"><div class="mdbody"><article class="md"></article></div></div>`;
+  view.innerHTML = `<div class="mdwrap markdown-body"><div class="mdbody"><article class="md"></article></div></div>`;
   const wrap = view.firstChild, body = wrap.firstChild, art = body.firstChild;
   art.appendChild(sanitize(html));
   art.querySelectorAll('img').forEach(i => { const s = i.getAttribute('src'); if (s && !/^[a-z]+:/i.test(s)) i.src = base + s; });
@@ -244,7 +212,7 @@ async function renderMarkdown(info, t) {
   const links = hs.map(h => {
     const a = document.createElement('a');
     a.textContent = h.textContent; a.title = h.textContent;
-    a.style.paddingLeft = 12 + (+h.tagName[1] - top) * 14 + 'px';
+    a.style.marginLeft = (+h.tagName[1] - top) + 'em';
     a.onclick = () => body.scrollTo({ top: h.offsetTop - 8 });
     toc.appendChild(a); return a;
   });
@@ -337,8 +305,6 @@ async function renderPptx(info, t) {
     if (m && +m[1] > 0) { ratio = +m[2] / +m[1]; setMeta('页面', (+m[1] / 360000).toFixed(1) + ' × ' + (+m[2] / 360000).toFixed(1) + ' cm'); }
   } catch (e) { }
   if (t !== token) return;
-  await fit(1280 + 64, Math.round(1280 * ratio) + 48, t);
-  if (t !== token) return;
   const host = document.createElement('div'); host.className = 'pptx-host';
   view.innerHTML = ''; view.appendChild(host);
   const w = Math.min(1280, view.clientWidth - 64);
@@ -379,34 +345,16 @@ async function renderFont(info, t) {
     `<div style="font-size:32px">ABCDEFGHIJKLMNOPQRSTUVWXYZ<br>abcdefghijklmnopqrstuvwxyz<br>!@#$%^&*()[]{}</div></div>`;
 }
 
-async function renderFallback(info, t) {
-  // 小文件嗅探一下是不是文本
-  if (info.size != null && info.size < 8 << 20) {
-    try {
-      const { buf } = await readHead(info.url, 8192);
-      if (t !== token) return;
-      if (buf.length && looksText(buf)) return renderText(Object.assign({}, info, { kind: 'text' }), t);
-    } catch (e) { }
-  }
-  card(info, info.ext ? info.ext.toUpperCase() + ' 文件' : '文件');
-}
-
 // ---------- 入口 ----------
 const peek = window.peek = {
   async show(info) {
     const t = ++token;
     cur = info; meta = {};
-    info.kind = info.isDir ? 'folder' : (KIND[info.ext] || (/^(readme|license|makefile|dockerfile|changelog)$/i.test(info.name) ? 'text' : 'other'));
     $('#name').textContent = info.name;
     $('#b-ocr').hidden = true; $('#ocrbox').hidden = true; $('#hash').textContent = '';
     $('#findbar').hidden = true;
     view.scrollTop = 0; view.scrollLeft = 0;
     renderProps();
-    // 图片、视频、PPT 拿到真实尺寸后再调；文档类用竖版纸张比例，其余用默认大小
-    const k = info.kind;
-    if (k === 'legacy' && /^(ppt|pps|pot|dps|dpt|odp)$/.test(info.ext)) fit(1344, 768);
-    else if (k === 'pdf' || k === 'docx' || k === 'legacy') fit(...PAGE_SIZE);
-    else if (k !== 'image' && k !== 'thumbimg' && k !== 'video' && k !== 'pptx') fit(...DEFAULT_SIZE);
     if (!info.exists) return card(info, '文件不存在');
     try {
       switch (info.kind) {
@@ -428,7 +376,7 @@ const peek = window.peek = {
         case 'zip': return await renderZip(info, t);
         case 'font': return await renderFont(info, t);
         case 'text': return await renderText(info, t);
-        default: return await renderFallback(info, t);
+        default: return card(info, info.ext ? info.ext.toUpperCase() + ' 文件' : '文件');
       }
     } catch (e) {
       if (t === token) card(info, '预览失败：' + (e && e.message || e));

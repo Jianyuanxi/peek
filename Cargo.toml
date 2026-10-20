@@ -14,7 +14,7 @@ md-5 = "0.10"
 webview2-com = "0.39"
 windows = { version = "0.62", features = [
   "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse",
-  "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_Common",
+  "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_Shell_PropertiesSystem", "Win32_Storage_EnhancedStorage",
   "Win32_Graphics_Gdi", "Win32_System_Registry", "Win32_System_Threading", "Win32_System_Time",
   "Win32_Storage_FileSystem", "Win32_System_WinRT", "Win32_Security", "Win32_System_DataExchange",
   "Foundation", "Foundation_Collections", "Globalization", "Graphics_Imaging", "Media_Ocr", "Storage", "Storage_Streams",

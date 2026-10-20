@@ -166,6 +166,22 @@ pub fn shell_open(path: &str) {
     }
 }
 
+/// 图片/视频像素尺寸（读系统属性，只读文件头，几毫秒），按 EXIF/视频旋转方向交换宽高
+pub fn media_size(path: &str) -> Option<(f64, f64)> {
+    use windows::Win32::Storage::EnhancedStorage::*;
+    use windows::Win32::UI::Shell::IShellItem2;
+    unsafe {
+        let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
+        let item: IShellItem2 = SHCreateItemFromParsingName(&HSTRING::from(path), None).ok()?;
+        let get = |k| item.GetUInt32(&k).ok().filter(|v| *v > 0);
+        let (w, h, rot) = match (get(PKEY_Image_HorizontalSize), get(PKEY_Image_VerticalSize)) {
+            (Some(w), Some(h)) => (w, h, get(PKEY_Photo_Orientation).map(|o| (5..=8).contains(&o)).unwrap_or(false)),
+            _ => (get(PKEY_Video_FrameWidth)?, get(PKEY_Video_FrameHeight)?, get(PKEY_Video_Orientation).map(|o| o == 90 || o == 270).unwrap_or(false)),
+        };
+        Some(if rot { (h as f64, w as f64) } else { (w as f64, h as f64) })
+    }
+}
+
 /// 系统缩略图（走资源管理器同一套缩略图提供程序），输出 32 位 BMP 字节
 pub fn thumbnail_bmp(path: &str, size: i32) -> Option<Vec<u8>> {
     unsafe {

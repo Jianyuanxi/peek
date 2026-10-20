@@ -48,7 +48,7 @@ button.on { background: var(--accent); color: #fff; }
 #props td { padding: 3px 0; vertical-align: top; word-break: break-all; }
 #props td:first-child { color: var(--muted); white-space: nowrap; padding-right: 10px; width: 1%; }
 #hashbox { margin-top: 12px; }
-#hash, #ocr { white-space: pre-wrap; word-break: break-all; font: 12px/1.6 "Cascadia Mono", "Noto Sans SC", monospace; user-select: text; margin: 6px 0 0; }
+#hash, #ocr { white-space: pre-wrap; word-break: break-all; font: 12px/1.6 Consolas, "Microsoft YaHei UI", "Microsoft YaHei", monospace; user-select: text; margin: 6px 0 0; }
 .ocr-h { margin-top: 14px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
 #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: rgba(0,0,0,.78); color: #fff; padding: 6px 14px; border-radius: 6px; font-size: 12px; }
 #toast[hidden] { display: none; }
@@ -61,29 +61,29 @@ button.on { background: var(--accent); color: #fff; }
 .zoomwrap { position: absolute; inset: 0; overflow: auto; display: flex; }
 .mdwrap { position: absolute; inset: 0; display: flex; }
 .mdbody { flex: 1; min-width: 0; overflow: auto; }
-.toc { width: 220px; flex: none; overflow: auto; padding: 14px 0; border-right: 1px solid var(--line); background: var(--panel); font-size: 13px; }
-.toc a { display: block; padding: 4px 10px; color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none; }
-.toc a:hover { color: var(--fg); }
-.toc a.on { color: var(--fg); font-weight: 600; background: var(--line); }
+/* 目录照原版：178px 浅灰底，树状缩进，当前章节左侧蓝条 */
+.toc { width: 178px; flex: none; overflow: auto; padding: 1em 1em 1em 1em; background: var(--bgColor-muted); font: 0.8em/1.5 "Segoe UI", "Microsoft YaHei UI", sans-serif; }
+.toc a { display: block; margin-bottom: 0.75em; color: var(--fgColor-default); cursor: pointer; overflow: hidden; text-overflow: ellipsis; text-decoration: none;
+  border-left: 2px solid transparent; padding-left: calc(1em - 2px); transition: border-color .2s ease-out; }
+.toc a:hover { color: var(--fgColor-accent); }
+.toc a.on { color: var(--fgColor-accent); border-left-color: var(--fgColor-accent); }
 @media (max-width: 720px) { .toc { display: none; } }
 .checker { background-image: linear-gradient(45deg, rgba(128,128,128,.12) 25%, transparent 25%, transparent 75%, rgba(128,128,128,.12) 75%), linear-gradient(45deg, rgba(128,128,128,.12) 25%, transparent 25%, transparent 75%, rgba(128,128,128,.12) 75%); background-size: 20px 20px; background-position: 0 0, 10px 10px; }
 video, audio { max-width: 100%; max-height: 100%; outline: none; }
 iframe.full { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; }
 iframe.full.pdf { bottom: auto; height: calc(100% + 18px); }
-/* 文本和代码：英文 Cascadia Mono（等宽，代码对齐），中文 Noto Sans SC（思源黑体）；自动换行，不出横向滚动 */
-pre.code { margin: 0; padding: 14px 18px; font: 14px/1.7 "Cascadia Mono", "Noto Sans SC", monospace; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; user-select: text; min-height: 100%; background: var(--code); }
+/* 文本和代码：同原版，英文 Consolas，中文微软雅黑 UI，14px；自动换行，不出横向滚动 */
+pre.code { margin: 0; padding: 12px 16px; font: 14px/1.6 Consolas, "Microsoft YaHei UI", "Microsoft YaHei", monospace; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; user-select: text; min-height: 100%; background: var(--code); }
 pre.code code.hljs { background: transparent; padding: 0; }
 /* code 元素默认用浏览器的 monospace（中文系统落到宋体），要显式继承上面的字体 */
 pre.code code { font: inherit; }
 .note { color: var(--muted); font-size: 12px; padding: 6px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 1; }
-.md { max-width: 900px; margin: 0 auto; padding: 20px 32px 60px; font-size: 14px; line-height: 1.7; user-select: text; }
-.md pre { background: var(--code); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; overflow: auto; }
-.md code { font-family: "Cascadia Mono", "Noto Sans SC", monospace; font-size: 13px; }
-.md pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-.md { overflow-wrap: anywhere; }
-.md table { border-collapse: collapse; } .md td, .md th { border: 1px solid var(--line); padding: 4px 10px; }
-.md img { max-width: 100%; }
-.md blockquote { margin: 0; padding-left: 14px; border-left: 3px solid var(--line); color: var(--muted); }
+/* Markdown 正文用 github-markdown.css（同原版），这里只补中文字体和自动换行 */
+.markdown-body { font-family: -apple-system, "Segoe UI", "Noto Sans", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --fontStack-monospace: Consolas, "Microsoft YaHei UI", "Microsoft YaHei", monospace; }
+.md { max-width: 1012px; margin: 0 auto; padding: 16px 24px 48px; user-select: text; overflow-wrap: anywhere; }
+.markdown-body .md pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.markdown-body .md pre code.hljs { padding: 0; background: transparent; }
 table.grid { border-collapse: collapse; font-size: 12px; user-select: text; }
 table.grid td, table.grid th { border: 1px solid var(--line); padding: 2px 8px; white-space: nowrap; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
 table.grid tr:first-child td, table.grid th { background: var(--panel); font-weight: 600; position: sticky; top: 0; }
@@ -96,15 +96,19 @@ table.grid tr:first-child td, table.grid th { background: var(--panel); font-wei
 .docx-host .docx-wrapper { background: transparent !important; padding: 20px !important; }
 .docx-host section.docx { box-shadow: 0 2px 10px rgba(0,0,0,.25) !important; margin-bottom: 20px !important; }
 .pptx-host { padding: 16px; display: flex; flex-direction: column; align-items: center; user-select: text; }
+/* pptx-preview 外层默认固定一页高、自带竖滚动条，滚动条占宽会让幻灯片溢出出现横向滚动；改成全部摊开，由外层滚动 */
+.pptx-host .pptx-preview-wrapper { height: auto !important; overflow: visible !important; background: transparent !important; }
+.pptx-host .pptx-preview-slide-wrapper { box-shadow: 0 2px 10px rgba(0,0,0,.2); }
 .list { width: 100%; border-collapse: collapse; font-size: 12.5px; user-select: text; }
 .list td { padding: 4px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .list td.n { width: 100%; white-space: normal; word-break: break-all; }
 .list td.r { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 .list tr:hover td { background: var(--panel); }
-.card { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px; text-align: center; }
-.card img { max-width: min(512px, 80%); max-height: 60%; object-fit: contain; }
-.card .big { font-size: 20px; font-weight: 600; word-break: break-all; }
-.card .sub { color: var(--muted); }
+.card { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 18px; padding: 12px 24px; }
+.card img { width: 112px; height: 112px; object-fit: contain; flex: none; }
+.card .txt { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.card .big { font-size: 16px; font-weight: 600; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card .sub { color: var(--muted); font-size: 12px; }
 .font-sample { padding: 24px 32px; user-select: text; }
 .font-sample div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 8px; }
 .spin { color: var(--muted); padding: 30px; text-align: center; }
