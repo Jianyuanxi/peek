@@ -127,6 +127,13 @@ function card(info, sub) {
   view.querySelector('img').onerror = function () { this.remove(); };
 }
 
+function converting(info) {
+  view.innerHTML = `<div class="conv"><img alt="" src="${thumbUrl(info.path, 1280)}"><div class="sub">正在转换完整预览…（第一次约 10 秒，之后秒开）</div></div>`;
+  const img = view.querySelector('img');
+  img.onerror = () => img.remove();
+  img.onload = () => img.style.maxWidth = img.naturalWidth + 'px';   // 系统缩略图分辨率不高，不放大，免得糊
+}
+
 function renderImage(info, src, isThumb) {
   view.innerHTML = `<div class="zoomwrap checker"><img class="img" alt="" draggable="false"></div>`;
   const img = view.querySelector('img'), wrap = view.firstChild;
@@ -376,7 +383,7 @@ const peek = window.peek = {
     const t = ++token;
     cur = info; meta = {};
     $('#name').textContent = info.name;
-    $('#b-ocr').hidden = true; $('#ocrbox').hidden = true; $('#hash').textContent = '';
+    $('#b-ocr').hidden = true; setPop('ocrpop', false); $('#hash').textContent = '';
     showFind(false);
     view.scrollTop = 0; view.scrollLeft = 0;
     renderProps();
@@ -396,7 +403,7 @@ const peek = window.peek = {
         case 'sheet': return await renderSheet(info, t);
         case 'pptx': return await renderPptx(info, t);
         case 'legacy':
-          card(info, '正在用 LibreOffice 转换预览…（第一次约 10 秒，之后秒开）');
+          converting(info);
           post('convert'); return;
         case 'zip': return await renderZip(info, t);
         case 'font': return await renderFont(info, t);
@@ -418,25 +425,60 @@ const peek = window.peek = {
   hash(h) { $('#hash').textContent = h.error ? h.error : `MD5\n${h.md5}\nSHA256\n${h.sha256}`; $('#b-hash').disabled = false; },
   ocr(r) {
     $('#b-ocr').disabled = false;
-    $('#side').hidden = false; renderProps();
-    $('#ocrbox').hidden = false;
-    $('#ocr').textContent = r.error ? '识别失败：' + r.error : (r.text || '（没有识别到文字）');
+    if (!cur || r.path && r.path !== cur.path) return;
+    $('#ocr').textContent = cur.ocr = r.error ? '识别失败：' + r.error : (r.text || '（没有识别到文字）');
+    setPop('ocrpop', true);
   },
 };
 
 // ---------- 交互 ----------
 function copyPath() { if (cur) navigator.clipboard.writeText(cur.path).then(() => toast('已复制路径')); }
+// 浮动卡片：详细信息、识别结果各有一个开关按钮；两者互斥，点卡片和按钮以外的地方就关掉（查找框例外，一直留着）
+const POPS = { side: '#b-info', ocrpop: '#b-ocr' };
+function setPop(id, on) {
+  if (on) for (const k in POPS) if (k !== id) setPop(k, false);
+  $('#' + id).hidden = !on; $(POPS[id]).classList.toggle('on', on);
+  if (id === 'side' && on) renderProps();
+}
+document.addEventListener('mousedown', e => {
+  for (const k in POPS) if (!$('#' + k).hidden && !e.target.closest('#' + k + ',' + POPS[k])) setPop(k, false);
+}, true);
+
+// 查找：自己遍历预览区的文字，用 CSS Custom Highlight 高亮全部结果和当前结果（不改动页面 DOM），显示"第几个/共几个"。
+// window.find 在输入框有焦点时找不到页面里的字，PPT 等预览里点上下箭头没反应，所以不用它
+let hits = [], hit = -1;
 function showFind(on) {
   $('#findbar').hidden = !on; $('#b-find').classList.toggle('on', on);
-  if (on) { $('#find-in').focus(); $('#find-in').select(); } else $('#find-st').textContent = '';
+  if (on) { $('#find-in').focus(); $('#find-in').select(); runFind(); }
+  else { hits = []; hit = -1; CSS.highlights.clear(); $('#find-st').textContent = ''; }
 }
 const toggleFind = () => showFind($('#findbar').hidden);
-function doFind(back) {
-  const q = $('#find-in').value; if (!q) return;
-  const ok = window.find(q, false, back, true, false, false, false);
-  $('#find-st').textContent = ok ? '' : '未找到';
-  $('#find-in').focus();
+function runFind() {
+  const q = $('#find-in').value.toLowerCase();
+  hits = []; hit = -1; CSS.highlights.clear();
+  if (q) {
+    const tw = document.createTreeWalker(view, NodeFilter.SHOW_TEXT);
+    for (let n; (n = tw.nextNode()) && hits.length < 5000;) {
+      const t = n.data.toLowerCase();
+      for (let i = t.indexOf(q); i >= 0 && hits.length < 5000; i = t.indexOf(q, i + q.length)) {
+        const r = new Range(); r.setStart(n, i); r.setEnd(n, i + q.length);
+        if (r.getClientRects().length) hits.push(r);   // 跳过看不见的（display:none 的工作表、折叠内容）
+      }
+    }
+    if (hits.length) { CSS.highlights.set('peek-hit', new Highlight(...hits)); return goFind(0); }
+  }
+  $('#find-st').textContent = q ? '0/0' : '';
 }
+function goFind(i) {
+  if (!hits.length) return;
+  hit = (i + hits.length) % hits.length;
+  CSS.highlights.set('peek-cur', new Highlight(hits[hit]));
+  hits[hit].startContainer.parentElement.scrollIntoView({ block: 'center', inline: 'nearest' });
+  $('#find-st').textContent = (hit + 1) + '/' + hits.length;
+}
+const doFind = back => { if (hits.length) goFind(hit + (back ? -1 : 1)); else runFind(); $('#find-in').focus(); };
+let findT;
+$('#find-in').addEventListener('input', () => { clearTimeout(findT); findT = setTimeout(runFind, 120); });
 $('#find-in').addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); doFind(e.shiftKey); }
   else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); showFind(false); }
@@ -449,9 +491,13 @@ $('#f-close').onclick = () => showFind(false);
 $('#b-copy').onclick = copyPath;
 $('#b-open').onclick = () => post('open');
 $('#b-pin').onclick = () => post('pin');
-$('#b-info').onclick = () => { $('#side').hidden = !$('#side').hidden; $('#b-info').classList.toggle('on', !$('#side').hidden); renderProps(); };
+$('#b-info').onclick = () => setPop('side', $('#side').hidden);
 $('#b-hash').onclick = () => { $('#b-hash').disabled = true; $('#hash').textContent = '计算中…'; post('hash'); };
-$('#b-ocr').onclick = () => { $('#b-ocr').disabled = true; toast('正在识别文字…'); post('ocr'); };
+$('#b-ocr').onclick = () => {
+  if (!$('#ocrpop').hidden) return setPop('ocrpop', false);
+  if (cur && cur.ocr != null) { $('#ocr').textContent = cur.ocr; return setPop('ocrpop', true); }   // 同一张图识别过就直接显示
+  $('#b-ocr').disabled = true; toast('正在识别文字…'); post('ocr');
+};
 
 $('#b-close').onclick = () => post('close');
 // 无系统标题栏：按住顶栏空白处（不是按钮）拖动窗口

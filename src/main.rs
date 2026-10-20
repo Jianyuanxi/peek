@@ -291,8 +291,8 @@ impl App {
                 let p = self.proxy.clone();
                 std::thread::spawn(move || {
                     let r = match native::ocr(&cur) {
-                        Ok(t) => json!({"text": t}),
-                        Err(e) => json!({"error": e}),
+                        Ok(t) => json!({"path": cur, "text": t}),
+                        Err(e) => json!({"path": cur, "error": e}),
                     };
                     let _ = p.send_event(UserEvent::Js(format!("peek.ocr({})", r)));
                 });

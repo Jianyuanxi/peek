@@ -53,20 +53,21 @@ button.on { background: var(--accent); color: #fff; }
 #findbar { top: 46px; max-width: calc(100vw - 16px); padding: 5px; display: flex; gap: 2px; align-items: center; }
 #find-in { width: 240px; min-width: 60px; flex: 0 1 auto; font: inherit; padding: 5px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); outline: none; margin-right: 4px; transition: border-color .12s; }
 #find-in:focus { border-color: var(--accent); }
-#find-st { color: var(--muted); font-size: 12px; min-width: 0; white-space: nowrap; }
+#find-st { color: var(--muted); font-size: 12px; min-width: 34px; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
 #find-st:empty { display: none; }
 #findbar button.ic { width: 28px; height: 26px; }
 #findbar button.ic svg { width: 15px; height: 15px; }
 #main { flex: 1; display: flex; min-height: 0; position: relative; }
 #view { flex: 1; min-width: 0; overflow: auto; position: relative; }
-#findbar:not([hidden]) ~ #main #side { top: 54px; max-height: calc(100% - 62px); }
-#side { top: 8px; width: 300px; max-height: calc(100% - 16px); overflow: auto; padding: 12px 14px; }
+#side, #ocrpop { top: 8px; width: 300px; max-height: calc(100% - 16px); overflow: auto; padding: 12px 14px; }
+#findbar:not([hidden]) ~ #main .pop { top: 54px; max-height: calc(100% - 62px); }
+#ocrpop { width: 340px; }
 #props { width: 100%; border-collapse: collapse; font-size: 12px; }
 #props td { padding: 3px 0; vertical-align: top; word-break: break-all; }
 #props td:first-child { color: var(--muted); white-space: nowrap; padding-right: 10px; width: 1%; }
 #hashbox { margin-top: 12px; }
 #hash, #ocr { white-space: pre-wrap; word-break: break-all; font: 12px/1.6 Consolas, "Microsoft YaHei UI", "Microsoft YaHei", monospace; user-select: text; margin: 6px 0 0; }
-.ocr-h { margin-top: 14px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+.ocr-h { font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
 #toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: rgba(32,32,36,.9); color: #fff; padding: 7px 16px; border-radius: 999px; font-size: 12px;
   box-shadow: 0 4px 16px rgba(0,0,0,.2); animation: toast-in .18s cubic-bezier(.2,.8,.3,1); pointer-events: none; }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
@@ -135,4 +136,10 @@ table.grid tr:first-child td, table.grid th { background: var(--panel); font-wei
 .font-sample { padding: 24px 32px; user-select: text; }
 .font-sample div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 8px; }
 .spin { color: var(--muted); padding: 30px; text-align: center; }
-mark.peek-hit { background: #fde047; color: #000; }
+/* 查找结果：全部浅黄，当前这个橙色 */
+::highlight(peek-hit) { background-color: #fde68a; color: #000; }
+::highlight(peek-cur) { background-color: #f97316; color: #fff; }
+/* 旧版 Office 转换期间先显示系统缩略图 */
+.conv { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; background: var(--paper); }
+.conv img { max-width: 100%; max-height: calc(100% - 40px); min-height: 0; object-fit: contain; box-shadow: 0 2px 12px rgba(0,0,0,.2); background: #fff; }
+.conv .sub { color: var(--muted); font-size: 12px; }
