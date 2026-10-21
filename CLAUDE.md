@@ -38,7 +38,7 @@ Windows 上资源管理器选中文件按空格预览。Rust（tao + wry/WebView
 
 ## 打包与部署
 
-- 安装包：`powershell -File installeruild.ps1` → `dist\QuickView-<版本>-Setup.exe`（Inno Setup 6，脚本 `installer\quickview.iss`，须保持 UTF-8 BOM + CRLF，`.gitattributes` 已设 `-text`）。按用户装到 `%LOCALAPPDATA%\Programs\QuickView`，开始菜单有快捷方式；卸载结束进程树（`taskkill /t`，否则 WebView2 子进程占着数据目录删不掉）、删自启快捷方式和数据目录。
+- 安装包：`powershell -File installerbuild.ps1` → `dist\QuickView-<版本>-Setup.exe`（Inno Setup 6，脚本 `installer\quickview.iss`，须保持 UTF-8 BOM + CRLF，`.gitattributes` 已设 `-text`）。按用户装到 `%LOCALAPPDATA%\Programs\QuickView`，开始菜单有快捷方式；卸载结束进程树（`taskkill /t`，否则 WebView2 子进程占着数据目录删不掉）、删自启快捷方式和数据目录。
 - 本机用的是**安装版**，改完要重新打包安装才生效（`/VERYSILENT` 静默装）；不再部署到 `E:\QuickLook\QuickView.exe`。自启快捷方式指向的 exe 不存在时，`ensure_autostart` 会改指到当前运行的 exe。
 - 发版：改 `Cargo.toml` 版本号，打 tag `vX.Y.Z`，`gh release create` 附上安装包；安装包不进 git。
 
