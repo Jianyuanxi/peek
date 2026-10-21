@@ -184,10 +184,25 @@ pub fn autostart_enabled() -> bool {
     }
 }
 
-/// 第一次运行时调用：快捷方式不在才建，不动用户在"设置"里的开关
+/// 每次启动时调用：快捷方式不在、或指向的 exe 已不存在（换了安装位置）才重写，不动用户在"设置"里的开关
 pub fn ensure_autostart() {
-    if startup_lnk().is_some_and(|p| !p.exists()) {
+    let Some(p) = startup_lnk() else { return };
+    if !p.exists() || lnk_target(&p).is_some_and(|t| !std::path::Path::new(&t).exists()) {
         let _ = write_lnk();
+    }
+}
+
+fn lnk_target(lnk: &std::path::Path) -> Option<String> {
+    use windows::core::Interface;
+    use windows::Win32::System::Com::*;
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let sl: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+        sl.cast::<IPersistFile>().ok()?.Load(&HSTRING::from(lnk.as_os_str()), STGM_READ).ok()?;
+        let mut buf = [0u16; 1024];
+        sl.GetPath(&mut buf, std::ptr::null_mut(), SLGP_RAWPATH.0 as u32).ok()?;
+        let n = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        Some(String::from_utf16_lossy(&buf[..n]))
     }
 }
 

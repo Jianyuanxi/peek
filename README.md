@@ -23,10 +23,13 @@ Rust（tao + wry / WebView2）写成的单个 exe，界面文件编译时打包�
 | 文本 | Markdown、HTML、CSV / TSV、代码与纯文本（按内容自动识别） |
 | 其他 | zip / jar / apk / epub 等压缩包列出内容，字体文件显示字样，文件夹和其他文件显示信息卡片 |
 
+## 安装
+
+从 [Releases](https://github.com/Jianyuanxi/quickview/releases) 下载 `QuickView-<版本>-Setup.exe` 运行即可：按当前用户安装到 `%LOCALAPPDATA%\Programs\QuickView`，不需要管理员权限，开始菜单里有 QuickView。第一次运行会在“启动”文件夹建快捷方式，之后开机自动运行；托盘菜单里可以关掉开机自启。卸载在“设置 > 应用”里，会一并删掉自启项和数据目录。
+
 ## 使用
 
-1. 从源码编译（见下文），运行 `QuickView.exe`。第一次运行会在“启动”文件夹建快捷方式，之后开机自动运行；托盘菜单里可以关掉开机自启。
-2. 在资源管理器里选中文件，按空格。
+在资源管理器或桌面选中文件，按空格。程序没在运行时从开始菜单打开 QuickView。
 
 命令行：`QuickView.exe <路径>` 把文件交给已运行的实例预览。
 
@@ -40,7 +43,13 @@ Rust（tao + wry / WebView2）写成的单个 exe，界面文件编译时打包�
 cargo build --release
 ```
 
-产物是 `target/release/quickview.exe`。
+产物是 `target/release/quickview.exe`。打安装包需要 [Inno Setup 6](https://jrsoftware.org/isinfo.php)：
+
+```bash
+powershell -File installer/build.ps1
+```
+
+生成 `dist/QuickView-<版本>-Setup.exe`。
 
 ## 第三方库
 
