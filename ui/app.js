@@ -298,6 +298,11 @@ async function renderDocx(info, t) {
   const host = document.createElement('div'); host.className = 'docx-host';
   await docx.renderAsync(buf, host, null, { inWrapper: true, breakPages: true, ignoreLastRenderedPageBreak: false, renderHeaders: true, renderFooters: true, renderFootnotes: true, useBase64URL: false, experimental: true });
   if (t !== token) return;
+  // 单元格里的负缩进：WPS/Word 截在单元格内，docx-preview 照搬成负 margin 会伸出边框
+  host.querySelectorAll('td p').forEach(p => {
+    if (parseFloat(p.style.marginInlineEnd) < 0) p.style.marginInlineEnd = '0';
+    if (parseFloat(p.style.marginInlineStart) < 0) p.style.marginInlineStart = '0';
+  });
   view.innerHTML = ''; view.appendChild(host);
   const pages = host.querySelectorAll('section.docx').length;
   if (pages) setMeta('页数', '约 ' + pages);
