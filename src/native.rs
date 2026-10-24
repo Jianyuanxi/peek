@@ -25,11 +25,33 @@ pub const KEY_CLOSE: isize = -1;
 pub const KEY_PREV: isize = -2;
 pub const KEY_NEXT: isize = -3;
 
+fn no_modifiers() -> bool {
+    !down(VK_CONTROL) && !down(VK_MENU) && !down(VK_SHIFT) && !down(VK_LWIN) && !down(VK_RWIN)
+}
+
+/// 预览窗口里的空格/Esc/↑/↓ 对应的命令，其他键或查找框有焦点时返回 0。
+/// 钩子和 WebView2 的 AcceleratorKeyPressed 共用：QuickView 自己在前台时 Windows 常常不调用本进程的低级钩子（实测），
+/// 焦点落在视频控件、PDF 查看器上时网页也收不到按键，所以要靠 AcceleratorKeyPressed 兜住。
+pub fn preview_key(vk: u32) -> isize {
+    if TYPING.load(std::sync::atomic::Ordering::Relaxed) || !no_modifiers() {
+        return 0;
+    }
+    if vk == VK_SPACE.0 as u32 || vk == VK_ESCAPE.0 as u32 {
+        KEY_CLOSE
+    } else if vk == VK_UP.0 as u32 {
+        KEY_PREV
+    } else if vk == VK_DOWN.0 as u32 {
+        KEY_NEXT
+    } else {
+        0
+    }
+}
+
 unsafe extern "system" fn kb_proc(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 && (wp.0 as u32 == WM_KEYDOWN) {
         let k = &*(lp.0 as *const KBDLLHOOKSTRUCT);
         let vk = k.vkCode;
-        if !down(VK_CONTROL) && !down(VK_MENU) && !down(VK_SHIFT) && !down(VK_LWIN) && !down(VK_RWIN) {
+        if no_modifiers() {
             let fg = GetForegroundWindow();
             let send = |v: isize| {
                 if let Some(tx) = HOOK_TX.get() {
@@ -38,21 +60,10 @@ unsafe extern "system" fn kb_proc(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT 
             };
             let own = OWN_HWND.load(std::sync::atomic::Ordering::Relaxed);
             if own != 0 && fg.0 as isize == own {
-                // 预览窗口里这几个键在原生层处理：PDF 查看器、视频控件拿到焦点后网页收不到按键
-                if !TYPING.load(std::sync::atomic::Ordering::Relaxed) {
-                    let cmd = if vk == VK_SPACE.0 as u32 || vk == VK_ESCAPE.0 as u32 {
-                        KEY_CLOSE
-                    } else if vk == VK_UP.0 as u32 {
-                        KEY_PREV
-                    } else if vk == VK_DOWN.0 as u32 {
-                        KEY_NEXT
-                    } else {
-                        0
-                    };
-                    if cmd != 0 {
-                        send(cmd);
-                        return LRESULT(1);
-                    }
+                let cmd = preview_key(vk);
+                if cmd != 0 {
+                    send(cmd);
+                    return LRESULT(1);
                 }
             } else if vk == VK_SPACE.0 as u32 && is_explorer_list(fg) {
                 send(fg.0 as isize);
@@ -86,8 +97,7 @@ fn is_explorer_list(fg: HWND) -> bool {
 pub fn start_hook(tx: Sender<isize>) {
     let _ = HOOK_TX.set(tx);
     std::thread::spawn(|| unsafe {
-        let _h = SetWindowsHookExW(WH_KEYBOARD_LL, Some(kb_proc), None, 0);
-        let mut msg = MSG::default();
+        let _h = SetWindowsHookExW(WH_KEYBOARD_LL, Some(kb_proc), None, 0);        let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);

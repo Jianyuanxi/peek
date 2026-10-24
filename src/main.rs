@@ -151,6 +151,7 @@ impl App {
             .build(&self.window)
             .expect("WebView2 创建失败");
         map_drives(&wv);
+        hook_keys(&wv, self.proxy.clone());
         self.webview = Some(wv);
         self.ready = false;
         self.pending.clear();
@@ -319,6 +320,33 @@ impl App {
 
 fn hwnd_of(w: &Window) -> windows::Win32::Foundation::HWND {
     windows::Win32::Foundation::HWND(w.hwnd() as _)
+}
+
+/// 焦点在 WebView 里任何位置（视频控件、PDF 查看器）时，空格/Esc/↑/↓ 都先经过这里，网页拿不到
+fn hook_keys(wv: &WebView, proxy: EventLoopProxy<UserEvent>) {
+    use webview2_com::AcceleratorKeyPressedEventHandler;
+    use webview2_com::Microsoft::Web::WebView2::Win32::*;
+    use wry::WebViewExtWindows;
+    let handler = AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
+        let Some(args) = args else { return Ok(()) };
+        let (mut kind, mut vk) = (COREWEBVIEW2_KEY_EVENT_KIND::default(), 0u32);
+        unsafe {
+            args.KeyEventKind(&mut kind)?;
+            args.VirtualKey(&mut vk)?;
+        }
+        if kind == COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN {
+            let cmd = native::preview_key(vk);
+            if cmd != 0 {
+                unsafe { args.SetHandled(true)? };
+                let _ = proxy.send_event(UserEvent::Key(cmd));
+            }
+        }
+        Ok(())
+    }));
+    let mut token = 0i64;
+    unsafe {
+        let _ = wv.controller().add_AcceleratorKeyPressed(&handler, &mut token);
+    }
 }
 
 /// 每个盘符映射成虚拟主机 x.peekfs，网页直接按 URL 读本地文件（支持视频拖动、Range 请求）

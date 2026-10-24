@@ -184,6 +184,9 @@ function renderMedia(info, tag) {
     if (tag === 'video' && m.videoWidth) { setMeta('分辨率', m.videoWidth + ' × ' + m.videoHeight); fit(m.videoWidth, m.videoHeight, t); }
   };
   m.onerror = () => t === token && card(info, '内置播放器不支持此编码，按 Enter 用默认播放器打开');
+  // 点过进度条/音量/播放键后焦点留在控件里，控件会吞掉所有按键（空格、Esc、↑/↓ 都到不了页面），用完就让出焦点
+  for (const ev of ['seeked', 'volumechange', 'play', 'pause', 'ratechange'])
+    m.addEventListener(ev, () => { if (document.activeElement === m) m.blur(); });
 }
 
 async function renderText(info, t) {
