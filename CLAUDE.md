@@ -23,11 +23,11 @@ Windows 上资源管理器选中文件按空格预览。Rust（tao + wry/WebView
 - **自动换行，不出横向滚动**（代码、文本、Markdown 都 `pre-wrap`；PDF 底部横向滚动条靠加高 iframe 裁掉）。
 - 文档类（docx/pdf/pptx）按原字体显示；代码和纯文本照原版用 14px Consolas + 微软雅黑 UI（`<code>` 要 `font: inherit`，否则落到宋体）。
 - Markdown 正文用 `vendor/github-markdown.css`（同原版），目录照原版 178px 浅灰底、树状缩进、当前章节左侧蓝条。
-- `vendor/pptx-preview.umd.js` 打过补丁（搜 `Peek 补丁`）：图片 rot/flipH/flipV 是手工改的；其余 12 项由 `tools/patch_pptx.py` 打（多余的 Content_Types 部件不再让整份空白、单页出错不连坐、缺图跳过、按 sldIdLst 排页、无边框、母版非占位符形状、showMasterSp、两端对齐/默认左对齐、prstClr、母版 bodyStyle 继承、形状自带 lstStyle、项目符号大小颜色）。升级该库：先补回 rot/flip，再跑脚本。
+- `vendor/pptx-preview.umd.js` 打过补丁（搜 `Peek 补丁`）：图片 rot/flipH/flipV 是手工改的；其余 15 项由 `tools/patch_pptx.py` 打（多余的 Content_Types 部件不再让整份空白、单页出错不连坐、缺图跳过（含 svgBlip 回退）、按 sldIdLst 排页、无边框、母版非占位符形状、showMasterSp、两端对齐/默认左对齐、prstClr、母版 bodyStyle 继承、形状自带 lstStyle、项目符号大小颜色、图表照 Excel/WPS（坐标范围与非零起点、网格线、每点颜色、图例、标题字号）、SVG 的 MIME、渐变绕中心旋转）。脚本的输入是只含 rot/flip 的版本：`git show 8519eee:ui/vendor/pptx-preview.umd.js`，不要在已打过补丁的文件上再跑。升级该库：先补回 rot/flip，再跑脚本。
 - `vendor/docx-preview.min.js` 打过补丁（`tools/patch_docx.py`）：认 `firstLineChars/hangingChars/leftChars/rightChars`（中文 Word/WPS 常用，原库不认，编号段落的负首行缩进会伸出表格边框）。`renderDocx` 另把单元格里 `margin-left + text-indent < 0` 的段落夹回 0。
-- 图片 OCR 先把小图放大（长边到约 2400px，最多 3 倍）再识别：Windows OCR 对小字很差（实测 10px 字 75%→87%）。试过加白边、灰度、再跑英文引擎按位置合并英文单词，都没提升或更差，不要再加。`QuickView.exe --ocr <图片> <输出文件>` 可单独测识别结果。
+- 图片 OCR 用 PaddleOCR PP-OCRv6 tiny（`src/paddle.rs`，模型 `assets/ocr/det.onnx`、`rec.onnx` 共约 6 MB，来自 ModelScope `RapidAI/RapidOCR`，字表在 rec 模型元数据 `character` 里），用**系统自带的 Windows ML** 推理，不打包 onnxruntime。系统内置的 onnxruntime 1.17 只认 IR ≤ 9，模型文件第 2 个字节（ir_version）已从 10 改成 9，换模型要照做。安装后模型在 `{app}\ocr\`。每次识别加载模型、用完释放（空闲内存不变，识别时峰值约 +100～170 MB）。实测准确率 99.7%（Windows OCR 78.6%），耗时约 0.2～0.6 秒（Windows OCR 0.08～0.3 秒）。模型缺失或 Windows ML 报错时退回 Windows.Media.Ocr（小图先放大，试过加白边、灰度、英文引擎合并都无效）。`QuickView.exe --ocr <图片> <输出文件>` 单独测识别；`QUICKVIEW_OCR=paddle` 只走 Paddle 并写出错误，`=win` 强制系统 OCR。
 - 开机自启时托盘可能建不起来（任务栏未就绪），托盘创建失败不能 `unwrap`，要重试；panic 写 `%LOCALAPPDATA%\QuickView\crash.log`。
-- 已做的功能：Enter 打开、Ctrl+C 复制路径、窗口置顶、Ctrl+F 查找、MD5/SHA256、图片 OCR（Windows.Media.Ocr）、文字可选中复制。
+- 已做的功能：Enter 打开、Ctrl+C 复制路径、窗口置顶、Ctrl+F 查找、MD5/SHA256、图片 OCR（PaddleOCR，退回 Windows.Media.Ocr）、文字可选中复制。
 
 ## 结构
 

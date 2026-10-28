@@ -52,6 +52,7 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 
 [Files]
 Source: "{#Exe}\quickview.exe"; DestDir: "{app}"; DestName: "QuickView.exe"; Flags: ignoreversion
+Source: "..\assets\ocr\*.onnx"; DestDir: "{app}\ocr"; Flags: ignoreversion
 
 [Icons]
 Name: "{userprograms}\QuickView"; Filename: "{app}\QuickView.exe"; Comment: "选中文件按空格预览"

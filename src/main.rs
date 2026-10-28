@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 mod info;
 mod native;
+mod paddle;
 mod shell;
 
 use serde_json::{json, Value};
@@ -412,7 +413,9 @@ fn main() {
     // 调试用：QuickView.exe --ocr <图片> <输出文件>，把识别结果写进输出文件（窗口程序没有控制台）
     if args.len() == 3 && args[0] == "--ocr" {
         let t = std::time::Instant::now();
-        let r = native::ocr(&args[1]).unwrap_or_else(|e| format!("ERR {e}"));
+        // QUICKVIEW_OCR=paddle 只走 PaddleOCR，出错直接写出错误（正常流程出错会静默退回系统 OCR）
+        let r = if std::env::var("QUICKVIEW_OCR").as_deref() == Ok("paddle") { paddle::ocr(&args[1]) } else { native::ocr(&args[1]) };
+        let r = r.unwrap_or_else(|e| format!("ERR {e}"));
         let _ = std::fs::write(&args[2], format!("{}ms\n{r}", t.elapsed().as_millis()));
         return;
     }

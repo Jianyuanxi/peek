@@ -400,6 +400,13 @@ pub fn ocr(path: &str) -> Result<String, String> {
     unsafe {
         let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
     }
+    // 优先 PaddleOCR（准得多）；模型缺失或 Windows ML 出错时退回系统 OCR。QUICKVIEW_OCR=win 强制用系统 OCR（对比测试用）
+    if std::env::var("QUICKVIEW_OCR").as_deref() != Ok("win") && crate::paddle::available() {
+        match crate::paddle::ocr(path) {
+            Ok(t) => return Ok(t),
+            Err(x) => eprintln!("paddle ocr: {x}"),
+        }
+    }
     let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path)).map_err(e)?.join().map_err(e)?;
     let stream = file.OpenAsync(FileAccessMode::Read).map_err(e)?.join().map_err(e)?;
     let dec = BitmapDecoder::CreateAsync(&stream).map_err(e)?.join().map_err(e)?;
