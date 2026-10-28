@@ -1,5 +1,6 @@
 """给 ui/vendor/pptx-preview.umd.js 打 Peek 补丁（第 1–12 项）。
-基准是仓库里已带 rot/flip 补丁的版本；升级该库时先手工补回 rot/flip，再跑本脚本。每项替换都核对命中次数，对不上就报错退出。"""
+基准是只带 rot/flip 补丁的版本：git show 8519eee:ui/vendor/pptx-preview.umd.js > ui/vendor/pptx-preview.umd.js；
+升级该库时先手工补回 rot/flip，再跑本脚本。每项替换都核对命中次数，对不上就报错退出。"""
 import os, sys
 P = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'ui', 'vendor', 'pptx-preview.umd.js')
 s = open(P, encoding='utf8').read()
@@ -27,7 +28,8 @@ rep('[4,(b=new Pr(m,_,this)).load()]',
 
 # 3. 图片引用了不存在的关系 ID（链接图片、损坏的引用）就跳过这张图，不让整页报错
 rep('p=d[I],f=p["p:blipFill"]["a:blip"].attrs["r:embed"],g=r.rels[f].target,y=new Mr(g,p,n,r,i),t.push(y);',
-    'p=d[I],f=Yn.get(p,["p:blipFill","a:blip","attrs","r:embed"]),r.rels[f]&&(g=r.rels[f].target,y=new Mr(g,p,n,r,i),t.push(y))/* Peek 补丁：缺图跳过 */;')
+    'p=d[I],f=Yn.get(p,["p:blipFill","a:blip","attrs","r:embed"])||function(x){x=[].concat(Yn.get(x,["a:extLst","a:ext"])||[]);for(var k=0;k<x.length;k++){var v=Yn.get(x[k],["asvg:svgBlip","attrs","r:embed"]);if(v)return v}}(Yn.get(p,["p:blipFill","a:blip"])),'
+    'r.rels[f]&&(g=r.rels[f].target,y=new Mr(g,p,n,r,i),t.push(y))/* Peek 补丁：缺图跳过；只有 SVG 没有 PNG 备份的用 SVG */;')
 
 # 4. 幻灯片按 presentation.xml 的 sldIdLst 排序（原库按文件名 slideN 的数字排，和 PowerPoint/WPS 的页序不一致），不在列表里的孤立页不显示
 rep('case 4:return r.sent(),[4,this._loadContentTypes()];case 5:return r.sent(),[2]',
@@ -78,9 +80,41 @@ rep('}return n},t.prototype._getInheritRProps',
 rep('Yn.get(t,["a:buChar","attrs","char"])&&(e.buChar=t["a:buChar"].attrs.char),',
     'Yn.get(t,["a:buChar","attrs","char"])&&(e.buChar=t["a:buChar"].attrs.char),'
     'Yn.get(t,["a:buSzPct","attrs","val"])&&(e.buSzPct=parseInt(t["a:buSzPct"].attrs.val)/1e5),'
-    'function(s){try{t["a:buClr"]&&s.node&&s.node.theme&&(e.buClr=ir(t["a:buClr"],s.node.theme,s.node))}catch(x){}}(this)/* Peek 补丁 */,', count=2)
+    'function(s){try{t["a:buClr"]&&s.node&&s.node.theme&&(e.buClr=dr(ir(t["a:buClr"],s.node.theme,s.node)))}catch(x){}}(this)/* Peek 补丁 */,', count=2)
 rep('n.style.color=r.style.color,n.style.fontSize=r.style.fontSize,n.textContent={n:"■"',
     'n.style.color=e.buClr||r.style.color,n.style.fontSize=parseFloat(r.style.fontSize)*(e.buSzPct||1)+"px",n.style.verticalAlign="middle"/* Peek 补丁 */,n.textContent={n:"■"')
+
+# 13. 柱状/折线图按图表 XML 调整 echarts 配置：坐标轴 min/max/majorUnit、Excel 式非零起点、网格线、
+#     每个数据点自己的颜色（dPt）和 varyColors、图例有无与位置、标题（无标题时不显示“图表标题”，不默认加粗）
+CHART = ('e.prototype.__peekChart=function(t,e){/* Peek 补丁：图表细节 */try{var s=this,o=this.options,ser=Yn.get(t,["c:ser"]);Array.isArray(ser)||(ser=[ser]);'
+         'var cl=function(x){try{return x?dr(ir(x,s.theme,s.ctx)):void 0}catch(r){}};'
+         'var hz=o.yAxis&&"category"===o.yAxis.type,va=hz?o.xAxis:o.yAxis,vx=Yn.get(e,["c:plotArea","c:valAx"]);Array.isArray(vx)&&(vx=vx[0]);'
+         'var mn=Yn.get(vx,["c:scaling","c:min","attrs","val"]),mx=Yn.get(vx,["c:scaling","c:max","attrs","val"]),mu=Yn.get(vx,["c:majorUnit","attrs","val"]);'
+         'null!=mn&&(va.min=+mn),null!=mx&&(va.max=+mx),null!=mu&&(va.interval=+mu);'
+         'if(null==mn&&!o.series.some((function(x){return x.stack}))){var al=[];o.series.forEach((function(x){al=al.concat(x.data.filter((function(v){return isFinite(v)})))}));'
+         'var lo=Math.min.apply(null,al),hi=Math.max.apply(null,al);al.length&&lo>0&&lo>5*hi/6&&(va.scale=!0)}'
+         'vx&&(va.splitLine={show:!!Yn.get(vx,["c:majorGridlines"])},"1"===Yn.get(vx,["c:delete","attrs","val"])&&(va.show=!1));'
+         'var vary="1"===Yn.get(t,["c:varyColors","attrs","val"])&&1===ser.length,acc=["accent1","accent2","accent3","accent4","accent5","accent6"];'
+         'ser.forEach((function(x,i){var d=Yn.get(x,["c:dPt"])||[],c={};Array.isArray(d)||(d=[d]),d.forEach((function(p){var k=Yn.get(p,["c:idx","attrs","val"]),v=cl(Yn.get(p,["c:spPr","a:solidFill"]));null!=k&&v&&(c[k]=v)}));'
+         'o.series[i]&&(o.series[i].data=o.series[i].data.map((function(v,k){var q=c[k]||(vary?cl({"a:schemeClr":{attrs:{val:acc[k%6]}}}):void 0);return q?{value:v,itemStyle:{color:q}}:v})))}));'
+         'var lg=Yn.get(e,["c:legend"]);if(lg){var lp=Yn.get(lg,["c:legendPos","attrs","val"])||"r";o.legend={show:!0,orient:"r"===lp||"l"===lp||"tr"===lp?"vertical":"horizontal"},'
+         '"t"===lp?(o.legend.top="top",o.legend.left="center"):"r"===lp||"tr"===lp?(o.legend.right=8,o.legend.top="tr"===lp?"top":"middle"):"l"===lp?(o.legend.left=8,o.legend.top="middle"):(o.legend.bottom="bottom",o.legend.left="center")}else o.legend={show:!1};'
+         'var ti=Yn.get(e,["c:title"]);o.title=o.title||{};if(ti){var tp=Yn.get(ti,["c:tx","c:rich","a:p"]);Array.isArray(tp)&&(tp=tp[0]);'
+         'var ra=Yn.get(tp,["a:pPr","a:defRPr","attrs"])||{},rb=Yn.get(tp,["a:r","attrs"])?{}:Yn.get(tp,["a:r","a:rPr","attrs"])||{},sz=+(rb.sz||ra.sz||1400);'
+         'o.title.textStyle={fontWeight:"1"===(rb.b||ra.b)?"bold":"normal",fontSize:Math.round(sz/75),color:"#595959"}}'
+         'else"1"!==Yn.get(e,["c:autoTitleDeleted","attrs","val"])&&1===ser.length&&o.series[0].name?(o.title.text=o.series[0].name,o.title.textStyle={fontWeight:"normal",fontSize:19,color:"#595959"}):o.title.show=!1'
+         '}catch(r){console.warn("pptx chart",r)}},')
+rep('e.prototype.parseChartTitle=function(t){', CHART + 'e.prototype.parseChartTitle=function(t){')
+for k in ('Bar', 'Line'):
+    rep('this.options.color=this.parse%sColors(n),this.options.legend={bottom:"bottom",left:"center"}' % k,
+        'this.options.color=this.parse%sColors(n),this.options.legend={bottom:"bottom",left:"center"},this.__peekChart(t,e)' % k)
+
+# 15. 形状的线性渐变绕形状中心旋转；原库绕左上角转，角度 180–360° 时整块变成起点色（WPS 里是渐隐）
+rep('h.setAttribute("gradientTransform","rotate(".concat(a.ang,")"))',
+    'h.setAttribute("gradientTransform","rotate(".concat(a.ang,",0.5,0.5)"))/* Peek 补丁 */')
+
+# 14. SVG 图片要给对 MIME，否则 data URL 是 image/* 显示不出来
+rep('case"gif":e="image/gif";break;', 'case"gif":e="image/gif";break;case"svg":e="image/svg+xml";break;/* Peek 补丁 */')
 
 open(P, 'w', encoding='utf8', newline='').write(s)
 print('patched')
