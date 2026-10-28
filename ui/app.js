@@ -305,6 +305,9 @@ async function renderDocx(info, t) {
   host.querySelectorAll('td p').forEach(p => {
     if (parseFloat(p.style.marginInlineEnd) < 0) p.style.marginInlineEnd = '0';
     if (parseFloat(p.style.marginInlineStart) < 0) p.style.marginInlineStart = '0';
+    // 悬挂缩进比左缩进还大（编号段落常见）时首行也会伸出边框，夹到单元格左边
+    const cs = getComputedStyle(p), ml = parseFloat(cs.marginLeft) || 0, ti = parseFloat(cs.textIndent) || 0;
+    if (ml + ti < 0) p.style.textIndent = -ml + 'px';
   });
   view.innerHTML = ''; view.appendChild(host);
   const pages = host.querySelectorAll('section.docx').length;

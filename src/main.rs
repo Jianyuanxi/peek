@@ -409,6 +409,13 @@ fn main() {
         selftest();
         return;
     }
+    // 调试用：QuickView.exe --ocr <图片> <输出文件>，把识别结果写进输出文件（窗口程序没有控制台）
+    if args.len() == 3 && args[0] == "--ocr" {
+        let t = std::time::Instant::now();
+        let r = native::ocr(&args[1]).unwrap_or_else(|e| format!("ERR {e}"));
+        let _ = std::fs::write(&args[2], format!("{}ms\n{r}", t.elapsed().as_millis()));
+        return;
+    }
     if !single_instance() {
         // 已在运行：把参数里的路径交给它预览
         if let Some(p) = args.first() {

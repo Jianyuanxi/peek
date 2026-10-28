@@ -23,7 +23,9 @@ Windows 上资源管理器选中文件按空格预览。Rust（tao + wry/WebView
 - **自动换行，不出横向滚动**（代码、文本、Markdown 都 `pre-wrap`；PDF 底部横向滚动条靠加高 iframe 裁掉）。
 - 文档类（docx/pdf/pptx）按原字体显示；代码和纯文本照原版用 14px Consolas + 微软雅黑 UI（`<code>` 要 `font: inherit`，否则落到宋体）。
 - Markdown 正文用 `vendor/github-markdown.css`（同原版），目录照原版 178px 浅灰底、树状缩进、当前章节左侧蓝条。
-- `vendor/pptx-preview.umd.js` 打过补丁（搜 `Peek 补丁`）：原库不处理图片的 rot/flipH/flipV。升级该库要重新打。
+- `vendor/pptx-preview.umd.js` 打过补丁（搜 `Peek 补丁`）：图片 rot/flipH/flipV 是手工改的；其余 12 项由 `tools/patch_pptx.py` 打（多余的 Content_Types 部件不再让整份空白、单页出错不连坐、缺图跳过、按 sldIdLst 排页、无边框、母版非占位符形状、showMasterSp、两端对齐/默认左对齐、prstClr、母版 bodyStyle 继承、形状自带 lstStyle、项目符号大小颜色）。升级该库：先补回 rot/flip，再跑脚本。
+- `vendor/docx-preview.min.js` 打过补丁（`tools/patch_docx.py`）：认 `firstLineChars/hangingChars/leftChars/rightChars`（中文 Word/WPS 常用，原库不认，编号段落的负首行缩进会伸出表格边框）。`renderDocx` 另把单元格里 `margin-left + text-indent < 0` 的段落夹回 0。
+- 图片 OCR 先把小图放大（长边到约 2400px，最多 3 倍）再识别：Windows OCR 对小字很差（实测 10px 字 75%→87%）。试过加白边、灰度、再跑英文引擎按位置合并英文单词，都没提升或更差，不要再加。`QuickView.exe --ocr <图片> <输出文件>` 可单独测识别结果。
 - 开机自启时托盘可能建不起来（任务栏未就绪），托盘创建失败不能 `unwrap`，要重试；panic 写 `%LOCALAPPDATA%\QuickView\crash.log`。
 - 已做的功能：Enter 打开、Ctrl+C 复制路径、窗口置顶、Ctrl+F 查找、MD5/SHA256、图片 OCR（Windows.Media.Ocr）、文字可选中复制。
 
@@ -38,7 +40,7 @@ Windows 上资源管理器选中文件按空格预览。Rust（tao + wry/WebView
 
 ## 打包与部署
 
-- 安装包：`powershell -File installerbuild.ps1` → `dist\QuickView-<版本>-Setup.exe`（Inno Setup 6，脚本 `installer\quickview.iss`，须保持 UTF-8 BOM + CRLF，`.gitattributes` 已设 `-text`）。按用户装到 `%LOCALAPPDATA%\Programs\QuickView`，开始菜单有快捷方式；卸载结束进程树（`taskkill /t`，否则 WebView2 子进程占着数据目录删不掉）、删自启快捷方式和数据目录。
+- 安装包：`pwsh -File installer\build.ps1` → `dist\QuickView-<版本>-Setup.exe`（Inno Setup 6，脚本 `installer\quickview.iss`，须保持 UTF-8 BOM + CRLF，`.gitattributes` 已设 `-text`）。按用户装到 `%LOCALAPPDATA%\Programs\QuickView`，开始菜单有快捷方式；卸载结束进程树（`taskkill /t`，否则 WebView2 子进程占着数据目录删不掉）、删自启快捷方式和数据目录。
 - 本机用的是**安装版**，改完要重新打包安装才生效（`/VERYSILENT` 静默装）；不再部署到 `E:\QuickLook\QuickView.exe`。自启快捷方式指向的 exe 不存在时，`ensure_autostart` 会改指到当前运行的 exe。
 - 发版：改 `Cargo.toml` 版本号，打 tag `vX.Y.Z`，`gh release create` 附上安装包；安装包不进 git。
 
