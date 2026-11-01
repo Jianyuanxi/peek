@@ -42,6 +42,47 @@ PATCHES.append(('Peek 补丁：页眉沿用',
     'let o=a[r][0].sectProps;/* Peek 补丁：页眉沿用（首页/偶数页/默认三种各自沿用） */var M=(p,c)=>[...(p||[]).filter(x=>!(c||[]).some(y=>y.type==x.type)),...(c||[])];'
     'o.headerRefs=M(this._ph,o.headerRefs),o.footerRefs=M(this._pf,o.footerRefs),this._ph=o.headerRefs,this._pf=o.footerRefs;const i=this.createPageElement('))
 
+# 东亚字体：原库 parseFont 不认 eastAsiaTheme，主题也只导出拉丁字体，Word 默认样式（minorEastAsia）的中文落到浏览器默认黑体。
+# 主题 <a:ea> 为空时 Word/WPS 用 <a:font script="Hans"> 指定的字体（一般是宋体/等线）
+PATCHES.append(('Peek 补丁：东亚字体',
+    'eaTypeface:t.elementAttr(e,"ea","typeface"),',
+    'eaTypeface:t.elementAttr(e,"ea","typeface")||t.elements(e,"font").find(c=>"Hans"==t.attr(c,"script"))?.getAttribute("typeface"),'))
+PATCHES.append(('Peek 补丁：东亚字体',
+    'r.minorFont&&(t["--docx-minorHAnsi-font"]=r.minorFont.latinTypeface));',
+    'r.minorFont&&(t["--docx-minorHAnsi-font"]=r.minorFont.latinTypeface),/* Peek 补丁：东亚字体 */'
+    'r.majorFont?.eaTypeface&&(t["--docx-majorEastAsia-font"]=r.majorFont.eaTypeface),r.minorFont?.eaTypeface&&(t["--docx-minorEastAsia-font"]=r.minorFont.eaTypeface));'))
+PATCHES.append(('Peek 补丁：东亚字体',
+    'parseFont(e,t){var r=[w.attr(e,"ascii"),ze.themeValue(e,"asciiTheme"),w.attr(e,"eastAsia")]',
+    'parseFont(e,t){var r=[w.attr(e,"ascii"),ze.themeValue(e,"asciiTheme"),w.attr(e,"eastAsia"),w.attr(e,"eastAsiaTheme")&&`var(--docx-${w.attr(e,"eastAsiaTheme")}-font, SimSun)`]'))
+
+# 页码：原库把 PAGE 域的缓存结果原样画出，同一页脚部件在每页都一样（封面 I、摘要也是 I），也不认 pgNumType 的格式。
+# 渲染时给 PAGE 域的结果打标记，每页画完页眉页脚后按节的 start（重新起编）/续编算页码，按 fmt 或域开关（\* ROMAN 等）格式化。
+# 仍不按高度分页，长节只算一页，后面的页码会偏小。
+PATCHES.append(('Peek 补丁：页码',
+    'renderRun(e){if(e.fieldRun)return null;',
+    'renderRun(e){if(e.fieldRun){/* Peek 补丁：页码 */for(const c of e.children)c.type==B.Instruction?this._fi=(this._fi||"")+c.text:c.type==B.ComplexField&&'
+    '("begin"==c.charType?this._fi="":"separate"==c.charType?this._fp=/^\\s*PAGE\\b/.test(this._fi||"")&&(this._fn=(this._fn||0)+1)+"|"+this._fi:"end"==c.charType&&(this._fp=!1));return null}'))
+PATCHES.append(('Peek 补丁：页码',
+    'const r=this.toHTML(e,Ge.html,"span",t);return e.id&&(r.id=e.id),r}',
+    'const r=this.toHTML(e,Ge.html,"span",t);return this._fp&&r.dataset&&(r.dataset.pg=this._fp),e.id&&(r.id=e.id),r}'))
+PATCHES.append(('Peek 补丁：页码',
+    'this.options.renderFooters&&this.renderHeaderFooter(o.footerRefs,o,t.length,s!=o,i),t.push(i),s=o}',
+    'this.options.renderFooters&&this.renderHeaderFooter(o.footerRefs,o,t.length,s!=o,i),(()=>{/* Peek 补丁：页码 */const p=a[r][0].sectProps,q=p.pageNumber;'
+    'this._pg=s!=p&&null!=q?.start?q.start:(this._pg||0)+1;const n=this._pg,R=()=>{let m=n,v="";for(const[k,c]of[[1e3,"M"],[900,"CM"],[500,"D"],[400,"CD"],[100,"C"],[90,"XC"],[50,"L"],[40,"XL"],[10,"X"],[9,"IX"],[5,"V"],[4,"IV"],[1,"I"]])for(;m>=k;m-=k)v+=c;return v},'
+    'L=()=>String.fromCharCode(65+(n-1)%26).repeat(Math.floor((n-1)/26)+1),seen={};'
+    'i.querySelectorAll("[data-pg]").forEach(x=>{const[id,ins]=x.dataset.pg.split("|");if(seen[id])return void(x.textContent="");seen[id]=1;'
+    'const sw=/\\\\\\*\\s*(\\w+)/.exec(ins)?.[1],f={ROMAN:"upperRoman",roman:"lowerRoman",Roman:"upperRoman",ALPHABETIC:"upperLetter",alphabetic:"lowerLetter",Arabic:"decimal"}[sw]||q?.format||"decimal",'
+    'v={decimal:n,upperRoman:R(),lowerRoman:R().toLowerCase(),upperLetter:L(),lowerLetter:L().toLowerCase(),numberInDash:"- "+n+" -"}[f];null!=v&&(x.textContent=String(v))})})(),t.push(i),s=o}'))
+# 设了“首页不同”（titlePg）但这一节和前面都没有首页页眉时，首页页眉为空；原库会退回默认页眉，封面多出页眉
+PATCHES.append(('Peek 补丁：首页页眉',
+    'var l=(t.titlePage&&a?e.find(e=>"first"==e.type):null)??(r%2==1&&n?e.find(e=>"even"==e.type):null)??e.find(e=>"default"==e.type)',
+    'var l=t.titlePage&&a?e.find(e=>"first"==e.type):(r%2==1&&n?e.find(e=>"even"==e.type):null)??e.find(e=>"default"==e.type)'))
+
+# 制表位：位置从版心左边算起。原库用段落盒子左边（已含左缩进）再加一次左缩进当原点，缩进段落（目录二级项）的第一个制表位跳得太远
+PATCHES.append(('Peek 补丁：制表位原点',
+    'const p=parseFloat(o.marginLeft),d=l.left+p,',
+    'const p=parseFloat(o.marginLeft),d=l.left-p/* Peek 补丁：制表位原点 */,'))
+
 done = 0
 for mark, old, new in PATCHES:
     if new in s:

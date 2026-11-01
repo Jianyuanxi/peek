@@ -116,5 +116,32 @@ rep('h.setAttribute("gradientTransform","rotate(".concat(a.ang,")"))',
 # 14. SVG 图片要给对 MIME，否则 data URL 是 image/* 显示不出来
 rep('case"gif":e="image/gif";break;', 'case"gif":e="image/gif";break;case"svg":e="image/svg+xml";break;/* Peek 补丁 */')
 
+# 18. 母版 txStyles / defaultTextStyle 用的段落解析 kr() 只认对齐、缩进、行距，母版 bodyStyle 里的项目符号丢了（Office 模板的正文圆点全没）
+BU = ('Yn.get(t,["a:buAutoNum","attrs","type"])&&(e.buAutoNum=t["a:buAutoNum"].attrs.type),'
+      'Yn.get(t,["a:buChar","attrs","char"])&&(e.buChar=t["a:buChar"].attrs.char),'
+      'Yn.get(t,["a:buSzPct","attrs","val"])&&(e.buSzPct=parseInt(t["a:buSzPct"].attrs.val)/1e5),'
+      'Yn.get(t,["a:spcBef","a:spcPts","attrs","val"])&&(e.spaceBefore=tr(parseInt(t["a:spcBef"]["a:spcPts"].attrs.val))),'
+      'Yn.get(t,["a:spcAft","a:spcPts","attrs","val"])&&(e.spaceAfter=tr(parseInt(t["a:spcAft"]["a:spcPts"].attrs.val))),')
+NONE = 't["a:buNone"]&&(e.buChar=e.buAutoNum="")/* Peek 补丁：buNone 盖掉继承的符号 */,'
+rep('(e.lineHeight=parseInt(t["a:lnSpc"]["a:spcPct"].attrs.val)/1e5),e}function Lr(',
+    '(e.lineHeight=parseInt(t["a:lnSpc"]["a:spcPct"].attrs.val)/1e5),/* Peek 补丁：母版项目符号 */' + BU + NONE + 'e}function Lr(')
+rep('}catch(x){}}(this)/* Peek 补丁 */,', '}catch(x){}}(this)/* Peek 补丁 */,' + NONE, count=2)
+
+# 19. 竖排：框高按 PPT 的 xfrm 定死，段落的 margin-top 一占，两个字的竖排放不下就折成两列，看着像横排；
+#     改成最小高度并且 wrap="none" 时不折行。vert/vert270（整体转 90°）原库当横排处理
+rep('"eaVert"===l.vert?(u.style.writingMode="vertical-rl",u.style.height=e.h+"px"):u.style.width=e.w+"px"',
+    '/^(eaVert|vert|vert270|wordArtVert|mongolianVert)$/.test(l.vert)?(/* Peek 补丁：竖排 */u.style.writingMode="vert270"===l.vert?"sideways-lr":"vertical-rl",'
+    '"vert"===l.vert&&(u.style.textOrientation="sideways"),"wordArtVert"===l.vert&&(u.style.textOrientation="upright"),'
+    'u.style.minHeight=e.h+"px","none"===l.wrap&&(u.style.whiteSpace="nowrap")):u.style.width=e.w+"px"')
+
+# 20. 超链接：PowerPoint/WPS 用主题的 hlink 色加下划线显示，原库不认 hlinkClick，显示成普通文字
+rep('r&&(e.color=ir(r,this.node.theme,this.node));',
+    'r&&(e.color=ir(r,this.node.theme,this.node));Yn.get(t,"a:hlinkClick")&&function(s){/* Peek 补丁：超链接 */e.underline=e.underline&&"none"!==e.underline?e.underline:"sng";'
+    'try{e.color=ir({"a:schemeClr":{attrs:{val:"hlink"}}},s.node.theme,s.node)}catch(x){}}(this);')
+
+# 21. 字距 spc（1/100 磅，和字号同一换算）；原库忽略
+rep('return a.bold&&(l.style.fontWeight="bold"),',
+    'return a.spc&&+a.spc&&(l.style.letterSpacing=parseInt(a.spc)/100*(u/(a.size||u))+"px")/* Peek 补丁：字距 */,a.bold&&(l.style.fontWeight="bold"),')
+
 open(P, 'w', encoding='utf8', newline='').write(s)
 print('patched')

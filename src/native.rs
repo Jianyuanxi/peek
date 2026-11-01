@@ -308,7 +308,11 @@ unsafe fn hbitmap_to_bmp(hb: HBITMAP) -> Option<Vec<u8>> {
             c[3] = 255;
         }
     }
-    // BITMAPV4 头，32 位 BI_BITFIELDS 带 alpha
+    Some(bmp32(w, h, &px))
+}
+
+/// 自上而下的 BGRA 像素 → 32 位带 alpha 的 BMP 文件字节（BITMAPV4 头，BI_BITFIELDS）
+fn bmp32(w: i32, h: i32, px: &[u8]) -> Vec<u8> {
     let hdr = 14 + 108;
     let mut f = Vec::with_capacity(hdr + px.len());
     f.extend_from_slice(b"BM");
@@ -330,8 +334,103 @@ unsafe fn hbitmap_to_bmp(hb: HBITMAP) -> Option<Vec<u8>> {
     f.extend_from_slice(&0xFF000000u32.to_le_bytes());
     f.extend_from_slice(b"BGRs");
     f.extend_from_slice(&[0u8; 36 + 12]); // 端点 + gamma
-    f.extend_from_slice(&px);
-    Some(f)
+    f.extend_from_slice(px);
+    f
+}
+
+/// 浏览器解不了的文档内嵌图（Office 常见的 EMF/WMF、Keynote 导出的 TIFF）转成 BMP。
+/// 图元文件用 GDI 回放：分别画在白底和黑底上，两者之差就是透明度，叠在彩色幻灯片上不会多出白框。
+pub fn convert_image(data: &[u8]) -> Option<Vec<u8>> {
+    if data.len() > 44 && &data[40..44] == b" EMF" {
+        return unsafe { emf_bmp(SetEnhMetaFileBits(data)) };
+    }
+    // WMF：可放置头（D7 CD C6 9A，22 字节，带边框和每英寸单位数）或裸的标准头
+    let placeable = data.len() > 22 && data[..4] == [0xD7, 0xCD, 0xC6, 0x9A];
+    if placeable || data.len() > 18 && matches!(data[..4], [1, 0, 9, 0] | [2, 0, 9, 0]) {
+        use windows::Win32::System::DataExchange::{SetWinMetaFileBits, METAFILEPICT};
+        let i16at = |o: usize| i16::from_le_bytes([data[o], data[o + 1]]) as i32;
+        let mut mfp = METAFILEPICT { mm: MM_ANISOTROPIC.0, ..Default::default() };
+        let body = if placeable {
+            let inch = (u16::from_le_bytes([data[14], data[15]]) as i32).max(1);
+            mfp.xExt = (i16at(10) - i16at(6)).abs() * 2540 / inch; // 0.01 mm
+            mfp.yExt = (i16at(12) - i16at(8)).abs() * 2540 / inch;
+            &data[22..]
+        } else {
+            data
+        };
+        return unsafe { emf_bmp(SetWinMetaFileBits(body, None, Some(&mfp))) };
+    }
+    raster_bmp(data).ok()
+}
+
+unsafe fn emf_bmp(emf: HENHMETAFILE) -> Option<Vec<u8>> {
+    if emf.is_invalid() {
+        return None;
+    }
+    let mut hd = ENHMETAHEADER::default();
+    GetEnhMetaFileHeader(emf, std::mem::size_of::<ENHMETAHEADER>() as u32, Some(&mut hd));
+    // rclFrame 单位 0.01 mm，按 96 DPI 换成像素，再放大到长边约 1600 保证清晰（太大则缩小）
+    let (fw, fh) = ((hd.rclFrame.right - hd.rclFrame.left) as f64 * 96.0 / 2540.0, (hd.rclFrame.bottom - hd.rclFrame.top) as f64 * 96.0 / 2540.0);
+    let k = if fw.max(fh) > 0.0 { (1600.0 / fw.max(fh)).min(4.0) } else { 1.0 };
+    let (w, h) = (((fw * k) as i32).clamp(1, 4096), ((fh * k) as i32).clamp(1, 4096));
+    let mut bi = BITMAPINFO::default();
+    bi.bmiHeader = BITMAPINFOHEADER {
+        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+        biWidth: w,
+        biHeight: -h,
+        biPlanes: 1,
+        biBitCount: 32,
+        biCompression: BI_RGB.0,
+        ..Default::default()
+    };
+    let dc = CreateCompatibleDC(None);
+    let mut layers = Vec::new();
+    for bg in [0xFFu8, 0] {
+        let mut bits = std::ptr::null_mut();
+        let Ok(hb) = CreateDIBSection(Some(dc), &bi, DIB_RGB_COLORS, &mut bits, None, 0) else { break };
+        let old = SelectObject(dc, hb.into());
+        std::ptr::write_bytes(bits as *mut u8, bg, (w * h * 4) as usize);
+        let _ = PlayEnhMetaFile(dc, emf, &RECT { left: 0, top: 0, right: w, bottom: h });
+        let _ = GdiFlush();
+        layers.push(std::slice::from_raw_parts(bits as *const u8, (w * h * 4) as usize).to_vec());
+        SelectObject(dc, old);
+        let _ = DeleteObject(hb.into());
+    }
+    let _ = DeleteDC(dc);
+    let _ = DeleteEnhMetaFile(Some(emf));
+    let [white, black] = <[Vec<u8>; 2]>::try_from(layers).ok()?;
+    let mut px = black;
+    for (p, wp) in px.chunks_mut(4).zip(white.chunks(4)) {
+        // 白底 - 黑底 = 255 - alpha；颜色取黑底上的值（已预乘），反预乘回来
+        let a = 255 - (wp[0] as i32 - p[0] as i32).max(wp[1] as i32 - p[1] as i32).max(wp[2] as i32 - p[2] as i32).clamp(0, 255);
+        for c in &mut p[..3] {
+            *c = if a > 0 { (*c as i32 * 255 / a).min(255) as u8 } else { 0 };
+        }
+        p[3] = a as u8;
+    }
+    Some(bmp32(w, h, &px))
+}
+
+/// 其余格式（TIFF 等）交给系统 WIC 解码
+fn raster_bmp(data: &[u8]) -> windows::core::Result<Vec<u8>> {
+    use windows::Graphics::Imaging::{BitmapAlphaMode, BitmapDecoder, BitmapPixelFormat, ExifOrientationMode, BitmapTransform, ColorManagementMode};
+    use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
+    unsafe {
+        let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
+    }
+    let s = InMemoryRandomAccessStream::new()?;
+    let wr = DataWriter::CreateDataWriter(&s)?;
+    wr.WriteBytes(data)?;
+    wr.StoreAsync()?.join()?;
+    wr.DetachStream()?;
+    s.Seek(0)?;
+    let dec = BitmapDecoder::CreateAsync(&s)?.join()?;
+    let (w, h) = (dec.OrientedPixelWidth()?, dec.OrientedPixelHeight()?);
+    let pd = dec
+        .GetPixelDataTransformedAsync(BitmapPixelFormat::Bgra8, BitmapAlphaMode::Straight, &BitmapTransform::new()?, ExifOrientationMode::RespectExifOrientation, ColorManagementMode::DoNotColorManage)?
+        .join()?;
+    let px = pd.DetachPixelData()?.to_vec();
+    Ok(bmp32(w as i32, h as i32, &px))
 }
 
 // ---------- PDF：用系统自带的 Windows.Data.Pdf 按页渲染成图片 ----------

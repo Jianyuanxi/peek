@@ -88,6 +88,19 @@ function decode(buf) {
 const buffer = url => fetch(url).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); });
 const thumbUrl = (p, s) => `http://peek.localhost/thumb?p=${encodeURIComponent(p)}&s=${s || 1280}&t=${Date.now()}`;
 
+// 文档内嵌的 EMF/WMF（Office 常见）、TIFF（Keynote 导出）浏览器解不了：加载失败时把字节交给后台用系统 GDI/WIC 转成 BMP
+document.addEventListener('error', async e => {
+  const el = e.target, svg = el.tagName === 'image', src = svg ? el.getAttribute('href') || el.getAttribute('xlink:href') : el.src;
+  if (!(el.tagName === 'IMG' || svg) || el.dataset.conv || !/^(blob|data):/.test(src || '')) return;
+  el.dataset.conv = 1;
+  try {
+    const r = await fetch('http://peek.localhost/imgconv', { method: 'POST', body: await (await fetch(src)).blob() });
+    if (!r.ok) return;
+    const url = URL.createObjectURL(await r.blob());
+    svg ? el.setAttribute('href', url) : el.src = url;
+  } catch { }
+}, true);
+
 // 系统属性读不到真实尺寸时（info.sized=false，如 SVG），页面拿到尺寸后再让窗口校正一次
 const fit = (w, h, t) => { if (t === token && !cur.sized && w > 0 && h > 0) post('fit', { w, h }); };
 // 加密/损坏、系统渲染不了的 PDF 才退回 WebView2 内置查看器：去掉顶部工具栏，

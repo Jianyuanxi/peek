@@ -74,8 +74,13 @@ fn bytes(ty: &str, b: Option<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
 /// 缩略图和 PDF 渲染要几十到几百毫秒，放到后台线程，别卡住 UI 线程
 fn serve_async(req: wry::http::Request<Vec<u8>>, res: wry::RequestAsyncResponder) {
     let path = req.uri().path().trim_start_matches('/').to_string();
-    if !matches!(path.as_str(), "thumb" | "pdfinfo" | "pdfpage") {
+    if !matches!(path.as_str(), "thumb" | "pdfinfo" | "pdfpage" | "imgconv") {
         return res.respond(serve(&path));
+    }
+    if path == "imgconv" {
+        // 文档里浏览器解不了的内嵌图（EMF/WMF/TIFF），页面把字节 POST 过来
+        let body = req.into_body();
+        return drop(std::thread::spawn(move || res.respond(bytes("image/bmp", native::convert_image(&body)))));
     }
     let q = req.uri().query().unwrap_or("").to_string();
     let arg = |k: &str| q.split('&').find_map(|kv| kv.strip_prefix(k).and_then(|v| v.strip_prefix('='))).map(url_decode);
@@ -417,6 +422,13 @@ fn main() {
         let r = if std::env::var("QUICKVIEW_OCR").as_deref() == Ok("paddle") { paddle::ocr(&args[1]) } else { native::ocr(&args[1]) };
         let r = r.unwrap_or_else(|e| format!("ERR {e}"));
         let _ = std::fs::write(&args[2], format!("{}ms\n{r}", t.elapsed().as_millis()));
+        return;
+    }
+    // 调试用：QuickView.exe --imgconv <EMF/WMF/TIFF> <输出.bmp>
+    if args.len() == 3 && args[0] == "--imgconv" {
+        if let Some(b) = std::fs::read(&args[1]).ok().and_then(|d| native::convert_image(&d)) {
+            let _ = std::fs::write(&args[2], b);
+        }
         return;
     }
     if !single_instance() {
