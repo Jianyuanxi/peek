@@ -299,8 +299,12 @@ async function renderDocx(info, t) {
   const [buf] = await Promise.all([buffer(info.url), lib('docx-preview.min.js')]);
   if (t !== token) return;
   const host = document.createElement('div'); host.className = 'docx-host';
-  await docx.renderAsync(buf, host, null, { inWrapper: true, breakPages: true, ignoreLastRenderedPageBreak: false, renderHeaders: true, renderFooters: true, renderFootnotes: true, useBase64URL: false, experimental: true });
+  const doc = await docx.renderAsync(buf, host, null, { inWrapper: true, breakPages: true, ignoreLastRenderedPageBreak: false, renderHeaders: true, renderFooters: true, renderFootnotes: true, useBase64URL: false, experimental: true });
   if (t !== token) return;
+  // 目录项带“超链接”字符样式，WPS/Word 显示成普通黑字，docx-preview 照样式渲染成蓝色下划线
+  const styles = doc?.stylesPart?.styles || [], cls = s => 'docx_' + s.id.replace(/[ .]+/g, '-').replace(/[&]+/g, 'and').toLowerCase();
+  const link = styles.filter(s => /^hyperlink$/i.test(s.name || '')).map(cls);
+  styles.filter(s => /^toc \d$/i.test(s.name || '')).forEach(s => host.querySelectorAll('p.' + CSS.escape(cls(s)) + ' span').forEach(sp => sp.classList.remove(...link)));
   // 单元格里的负缩进：WPS/Word 截在单元格内，docx-preview 照搬成负 margin 会伸出边框
   host.querySelectorAll('td p').forEach(p => {
     if (parseFloat(p.style.marginInlineEnd) < 0) p.style.marginInlineEnd = '0';
